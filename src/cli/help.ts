@@ -184,6 +184,18 @@ const helpEntries: Record<string, HelpEntry> = {
       "Claude Code settings: ocx claude config <status|set> ...",
     ],
   },
+  opencode: {
+    usage: "ocx opencode [opencode args...]",
+    summary: "Launch opencode wired to the proxy (generated provider config).",
+    details: [
+      "Ensures the proxy is running, then execs `opencode` with OPENCODE_CONFIG pointed at a",
+      "generated config in the opencodex config dir. Your own opencode.json is never modified —",
+      "its settings are merged forward into the generated copy, and only the `opencodex`",
+      "provider key is overwritten.",
+      "Routed models appear in the model picker as opencodex/<provider>/<model>.",
+      "Stop using `ocx opencode` and plain `opencode` behaves exactly as before.",
+    ],
+  },
   restart: {
     usage: "ocx restart",
     summary: "Stop the proxy and restart it (background). Equivalent to stop + ensure.",
@@ -256,6 +268,7 @@ Usage:
   ocx config <sub>            Validated configuration show/get/set/import/export
   ocx claude [args...]        Launch Claude Code wired to the proxy (model discovery on)
   ocx claude desktop [sub]    Manage and apply Claude Desktop's four-family profile
+  ocx opencode [args...]      Launch opencode wired to the proxy (runtime provider config)
   ocx help [command]          Show help
   ocx --version | -v          Print version
 
