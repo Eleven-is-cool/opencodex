@@ -19,7 +19,7 @@ on:
       - ".github/workflows/release.yml"
       - ".github/workflows/enforce-pr-target.yml"
   push:
-    branches: [main, preview, dev]
+    branches: [main, preview, dev, dev2-go]
     paths:
       - "src/**"
       - "go/**"
