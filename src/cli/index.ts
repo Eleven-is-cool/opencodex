@@ -818,7 +818,7 @@ switch (command) {
     break;
   }
   case "codex-shim": {
-    const { codexShimStatus, installCodexShim, uninstallCodexShim } = await import("../codex/shim");
+    const { codexShimStatus, installCodexShim, refreshCodexShimRuntime, uninstallCodexShim } = await import("../codex/shim");
     switch (args[1]) {
       case "install": {
         const r = installCodexShim();
@@ -828,6 +828,15 @@ switch (command) {
       case "status":
         console.log(codexShimStatus());
         break;
+      case "refresh-runtime": {
+        const r = refreshCodexShimRuntime();
+        if (!r.refreshed) {
+          console.error(r.message);
+          process.exit(1);
+        }
+        console.log(r.message);
+        break;
+      }
       case "uninstall":
       case "remove": {
         const r = uninstallCodexShim();
