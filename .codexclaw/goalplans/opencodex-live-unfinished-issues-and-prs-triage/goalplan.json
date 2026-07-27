@@ -2,7 +2,7 @@
   "objective": "OpenCodex live unfinished issues and PRs triage against current GitHub state. Scope: repository lidge-jun/opencodex, dev target only, worktree <local-worktree>. First work-phase is docs-only manifest/devlog: fetch live open PRs and open issues via gh, record current number/title/state/base/head/mergeable/checks/reviews/labels, classify every item into merge now, takeover-fix, comment/request-changes, needs-author-rebase, needs-human/security, later/enhancement, upstream-tracking, or close, and produce a priority table. Later work-phases process exactly one PR or one issue per full PABCD cycle. Allowed: directly fix bugfix/simple safe items on dev, create PRs, wait for CI, squash merge, and close linked issues when live evidence proves safety. Out of scope: main/preview/release branches, automatic merge of security/auth/permission/data-migration/privilege-boundary work, and unapproved GUI/UX decisions except the approved OpenRouter Free separate-provider direction. Terminal outcomes: DONE when all safe live items are processed and manifest evidence is current; NOOP when an item needs no action after live check; NEEDS_HUMAN or UNSAFE for risk-bound/security/UX-decision items; BLOCKED for external author/rebase/CI or upstream dependency; BUDGET_EXHAUSTED only if explicit runtime bounds are hit. Verification: gh live snapshots, code/diff review for candidate PRs, CI/check URLs where actions occur, comments/merge/close URLs for external state changes, and devlog evidence committed locally before completion.",
   "slug": "opencodex-live-unfinished-issues-and-prs-triage",
   "createdAt": "2026-07-27T10:35:02.724Z",
-  "updatedAt": "2026-07-27T14:05:45.000Z",
+  "updatedAt": "2026-07-27T14:35:51.000Z",
   "activeWorkPhaseId": null,
   "workPhases": [
     {
@@ -309,6 +309,26 @@
       "criteriaIds": [
         "C-WP13-PR555-ISSUE521"
       ]
+    },
+    {
+      "id": "WP14",
+      "title": "PR #556 bridge CodeRabbit follow-ups",
+      "status": "done",
+      "tasks": [
+        {
+          "id": "WP14-T1",
+          "title": "Re-check PR #556 live head, diff, review, checks, and dev ancestry",
+          "status": "done"
+        },
+        {
+          "id": "WP14-T2",
+          "title": "Independently audit phase-omission and content_filter behavior, then merge or hold with exact blocker evidence",
+          "status": "done"
+        }
+      ],
+      "criteriaIds": [
+        "C-WP14-PR556"
+      ]
     }
   ],
   "criteria": [
@@ -408,6 +428,13 @@
       "scenario": "PR #555 / Issue #521 web-search SSE heartbeat bug is merged, fixed, or has a precise blocker/request-changes decision.",
       "expectedEvidence": "live PR/issue state, review/check evidence, code pointers, independent audit, and merge/comment/close URL if external state changes.",
       "capturedEvidence": "WP13 completed on 2026-07-27. Live PR #555 was a non-draft bugfix PR against dev. Original head 953eaf92e89e9d6dda75d229a694f83be7d2264a was mergeable but stale by 60 commits relative to origin/dev, so it was rebased onto origin/dev 14ae6fe991c3b2e3517336d23dc8b4a393a6b565 and pushed with force-with-lease as d2bef1345f6f14de22902d365191bb8f3fa352e9. The diff changed only src/bridge.ts and tests/bridge.test.ts, separating upstreamActivity from wireActivity so invisible adapter heartbeats reset only the stall watchdog while parser-ignored response.heartbeat frames continue during client-visible wire silence. Local focused verification on rebased head passed: git diff --check origin/dev...HEAD, bun test tests/bridge.test.ts = 46 pass/0 fail/129 assertions, bun x tsc --noEmit, and bun run privacy:scan. Pre-push full gate passed: typecheck, GUI lint, root tests 5067 pass/0 fail/24942 assertions, privacy scan, and React Doctor no issues. Independent Sol audit returned VERDICT: MERGE and noted no auth/security surface changed. Hosted checks on d2bef134 all passed: CodeRabbit, enforce-target, label, react-doctor, ubuntu-latest, windows-latest, macos-latest after rerun, and npm-global ubuntu/windows/macos. The initial macos-latest attempt had one unrelated timeout in tests/cursor-native-exec-shell.test.ts, then reran green. PR #555 was squash-merged into dev with --match-head-commit d2bef134 as df57bd96025ea322321a16b504f95eb7bfb42026: https://github.com/lidge-jun/opencodex/pull/555. Issue #521 remained open after merge and was manually closed with fix evidence: https://github.com/lidge-jun/opencodex/issues/521. Devlog evidence: devlog/_plan/260727_live_unfinished_triage/025_pr555_web_search_heartbeat.md.",
+      "status": "met"
+    },
+    {
+      "id": "C-WP14-PR556",
+      "scenario": "PR #556 bridge CodeRabbit follow-ups are merged, fixed, or held with precise blocker evidence.",
+      "expectedEvidence": "live PR head/check/review state, diff/code pointers, independent audit, local verification output, hosted check evidence, and merge/comment URL if external state changes.",
+      "capturedEvidence": "WP14 completed on 2026-07-27. PR #556 live triage started at head 8959f5e6f794c687cad45439cd310c050793851e, non-draft bugfix against dev and mergeable. Initial diff changed src/bridge.ts and tests/bridge.test.ts for omitted text_delta phase preservation, batch content_filter incomplete semantics, compaction exclusion, and adapter heartbeat filtering. Local exact-head verification on 8959f5e6 passed: git merge-base --is-ancestor origin/dev HEAD, git diff --check origin/dev...HEAD, bun test --isolate tests/bridge.test.ts tests/bridge-lifecycle.test.ts = 63 pass/0 fail/160 assertions, bun run typecheck, and bun run privacy:scan. Kepler independent Sol audit returned VERDICT: PASS with blockers 0 and no auth/security/data/permission surface. CodeRabbit then produced one valid actionable test gap; maintainer commit de8942f0cad5b7a8aef85f242e9ae02c2e47fe76 added the { compaction: true } content_filter assertion and was pushed to the PR branch after pre-push gates passed: typecheck, GUI lint, root tests 5069 pass/0 fail/24949 assertions, privacy scan, and React Doctor no issues. Contributor then pushed final head 18fade98c7d64ff3fc1adf1c21b40bd023526863, adding deterministic timer-seam heartbeat coverage. Final-head local verification passed: git diff --check origin/dev...HEAD, bun test --isolate tests/bridge.test.ts tests/bridge-lifecycle.test.ts = 63 pass/0 fail/162 assertions, bun run typecheck, and bun run privacy:scan. Kepler follow-up audit on 18fade98 returned VERDICT: PASS with blockers 0, timer seam production-safe, deterministic heartbeat/content_filter coverage, and no security/data boundary. Hosted checks on 18fade98 all passed: CodeRabbit, enforce-target, label, react-doctor, ubuntu-latest, macos-latest, windows-latest, and npm-global ubuntu/macos/windows. PR #556 https://github.com/lidge-jun/opencodex/pull/556 was squash-merged into dev at 2026-07-27T14:35:51Z as 800ebc93101f244a77dc61483d3de6741d5f7ca5. No linked issue was closed.",
       "status": "met"
     }
   ],
