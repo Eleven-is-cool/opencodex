@@ -269,6 +269,26 @@
       "criteriaIds": [
         "C-WP8-ISSUE509"
       ]
+    },
+    {
+      "id": "WP12",
+      "title": "PR #551 / Issue #549 custom image relay provider triage",
+      "status": "pending",
+      "tasks": [
+        {
+          "id": "WP12-T1",
+          "title": "Re-check PR #551 and issue #549 live state, reviews, checks, and diff",
+          "status": "pending"
+        },
+        {
+          "id": "WP12-T2",
+          "title": "Decide merge, takeover-fix, request-changes, or needs-info for the custom image relay provider bug",
+          "status": "pending"
+        }
+      ],
+      "criteriaIds": [
+        "C-WP12-PR551-ISSUE549"
+      ]
     }
   ],
   "criteria": [
@@ -304,8 +324,8 @@
       "id": "C-WP2-PR528",
       "scenario": "PR #528 receives a request-changes comment for credential-origin binding and stale checks.",
       "expectedEvidence": "live PR head/checks, independent review verdict, and comment/review URL.",
-      "capturedEvidence": "",
-      "status": "open"
+      "capturedEvidence": "WP2 closed by cxc D at 2026-07-27T12:56:58Z. Live PR #528 remained OPEN on dev with head 553e9afc6f16135d83d8ab2d3ab0cb309675b81b and reviewDecision CHANGES_REQUESTED. Owner review at 2026-07-27T12:03:20Z already requested changes for a DNS-rebinding remote-download security blocker. Local code review confirmed src/images/artifacts.ts validates with assertUrlResolvesPublic(url) and then calls fetch(url), while src/lib/destination-policy.ts discards the validated DNS answers; tests/images/artifacts-ssrf.test.ts lacked a validation-public/connection-private rebinding regression. Independent Curie audit agreed no auto-merge. PR was stale relative to origin/dev@261abb7f: merge-base 703c6191 and rev-list origin/dev...origin/pr/528 = 143 behind / 6 ahead. No duplicate comment, retarget, push, or merge was performed; existing owner CHANGES_REQUESTED remains authoritative.",
+      "status": "met"
     },
     {
       "id": "C-WP11-PR526-FINAL",
@@ -318,22 +338,22 @@
       "id": "C-WP3-ISSUE543",
       "scenario": "Issue #543 receives a concrete support reply naming the existing debug capture switch and requested evidence.",
       "expectedEvidence": "comment URL plus code/docs pointers for `ocx debug claude` or `OCX_CLAUDE_DEBUG=1`.",
-      "capturedEvidence": "",
-      "status": "open"
+      "capturedEvidence": "WP3 closed by cxc D at 2026-07-27T13:00:43Z. Live issue #543 remained OPEN with labels bug/provider-compatibility/needs-info. Reporter controls showed native Claude Code and same OpenCodex/Kiro proxy with opus-4.8 worked, narrowing failure to Kiro claude-opus-5 or its catalog/1M path. Latest owner comment https://github.com/lidge-jun/opencodex/issues/543#issuecomment-5091015994 already requested the decisive Opus 5 inbound /v1/messages wire capture with OCX_QUEUE_543 marker presence/absence and block types. Code pointers: src/lib/debug-settings.ts exposes ocx debug claude / OCX_CLAUDE_DEBUG, and src/claude/inbound-debug.ts intentionally stores allowlist scalar metadata only without prompt text or block shapes. Independent Helmholtz audit agreed no functional fix, close, or duplicate comment was justified. Devlog evidence: devlog/_plan/260727_live_unfinished_triage/021_issue543_kiro_opus5_queue.md.",
+      "status": "met"
     },
     {
       "id": "C-WP4-ISSUE547",
       "scenario": "Issue #547 receives a concrete evidence request for Claude Desktop custom-model visibility.",
       "expectedEvidence": "comment URL plus requested config/log/profile evidence.",
-      "capturedEvidence": "",
-      "status": "open"
+      "capturedEvidence": "WP4 closed by cxc D at 2026-07-27T13:04:41Z. Live issue #547 remained OPEN with labels bug/needs-info. Latest owner comment https://github.com/lidge-jun/opencodex/issues/547#issuecomment-5091015669 already asks reporter to retry with a build containing #552 / 7c74e0a2, fully restart Claude Desktop, run ocx claude desktop, ocx claude desktop show --json, and verify the Windows LOCALAPPDATA Claude-3p configLibrary path. #552/7c74e0a2 is on current dev and fixes the Desktop 3P path resolver. Independent Nash audit agreed no close or duplicate comment until reporter retries. While processing, stale English docs/SOT path text was fixed in docs-site/src/content/docs/guides/claude-code.md and structure/04_transports-and-sidecars.md. Verification: bun test tests/claude-desktop-config-path.test.ts = 13 pass/0 fail; bun run privacy:scan passed; git diff --check passed. Devlog evidence: devlog/_plan/260727_live_unfinished_triage/022_issue547_desktop_visibility.md.",
+      "status": "met"
     },
     {
       "id": "C-WP5-ISSUE545",
       "scenario": "Issue #545 is narrowed to a proven local fix or exact remaining evidence need.",
       "expectedEvidence": "code pointers, test/command output if fixed, PR/comment URL.",
-      "capturedEvidence": "",
-      "status": "open"
+      "capturedEvidence": "WP5 closed by cxc D at 2026-07-27T13:07:59Z. Live issue #545 remained OPEN with labels bug/needs-info. Prior request-log bug for response.incomplete/max_output_tokens was already fixed on dev by 7fcaa911. Reporter inbound structural capture proved five identical max_tokens=64 classifier-shaped requests ending max_output_tokens, but did not prove OpenCodex caused the large system payload or lost stop_sequences. Code pointers: src/claude/inbound.ts maps max_tokens to max_output_tokens and stop_sequences to stop; src/claude/outbound.ts maps max_output_tokens incomplete back to Anthropic stop_reason=max_tokens; src/server/request-log.ts classifies structured max_output_tokens incomplete as HTTP 200/incomplete. Independent Arendt audit agreed no code change, close, or duplicate comment; latest owner comment https://github.com/lidge-jun/opencodex/issues/545#issuecomment-5091016132 already requests the decisive outbound provider request shape. Devlog evidence: devlog/_plan/260727_live_unfinished_triage/023_issue545_classifier_64_token.md.",
+      "status": "met"
     },
     {
       "id": "C-WP6-PR527",
@@ -353,6 +373,13 @@
       "id": "C-WP8-ISSUE509",
       "scenario": "Issue #509 heap watchdog gap has a proven fix or a fresh investigation comment with code pointers.",
       "expectedEvidence": "test/command output if fixed, otherwise comment URL plus code pointers.",
+      "capturedEvidence": "WP8 closed by cxc D at 2026-07-27T12:52:13Z. Issue #509 was fixed by PR #554 https://github.com/lidge-jun/opencodex/pull/554 and closed as completed after merge. Implementation exposed external, arrayBuffers, observedBytes, and observedMetric from /api/system/memory; changed watchdog/doctor/GUI drift behavior to use observed memory defined as max(rss, external, arrayBuffers); and updated docs/SOT/tests. Local verification passed: bun test tests/memory-watchdog.test.ts tests/doctor.test.ts = 36 pass/0 fail/143 assertions; cd gui && bun test tests/memory-observability-card.test.tsx = 3 pass/0 fail/12 assertions; bun x tsc --noEmit exit 0; cd gui && bun run lint exit 0; cd gui && bun run build exit 0 with existing Vite large-chunk warning only; bun run privacy:scan passed; git diff --check exit 0. Hosted PR #554 checks passed: ubuntu-latest, macos-latest, windows-latest, npm-global ubuntu/macos/windows, react-doctor, enforce-target, label, and CodeRabbit. PR #554 squash-merged into dev at 2026-07-27T12:50:46Z as 261abb7ff7826f82713e0ae033ab930cb78923f7. Issue comment https://github.com/lidge-jun/opencodex/issues/509#issuecomment-5091509482 documented the fix, and issue #509 was closed completed.",
+      "status": "met"
+    },
+    {
+      "id": "C-WP12-PR551-ISSUE549",
+      "scenario": "PR #551 / Issue #549 custom image relay provider bug is merged, fixed, or has a precise blocker/request-changes decision.",
+      "expectedEvidence": "live PR/issue state, review/check evidence, code pointers, independent audit, and merge/comment/close URL if external state changes.",
       "capturedEvidence": "",
       "status": "open"
     }
