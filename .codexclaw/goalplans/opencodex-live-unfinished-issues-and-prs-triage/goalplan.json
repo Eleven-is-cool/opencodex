@@ -2,7 +2,7 @@
   "objective": "OpenCodex live unfinished issues and PRs triage against current GitHub state. Scope: repository lidge-jun/opencodex, dev target only, worktree <local-worktree>. First work-phase is docs-only manifest/devlog: fetch live open PRs and open issues via gh, record current number/title/state/base/head/mergeable/checks/reviews/labels, classify every item into merge now, takeover-fix, comment/request-changes, needs-author-rebase, needs-human/security, later/enhancement, upstream-tracking, or close, and produce a priority table. Later work-phases process exactly one PR or one issue per full PABCD cycle. Allowed: directly fix bugfix/simple safe items on dev, create PRs, wait for CI, squash merge, and close linked issues when live evidence proves safety. Out of scope: main/preview/release branches, automatic merge of security/auth/permission/data-migration/privilege-boundary work, and unapproved GUI/UX decisions except the approved OpenRouter Free separate-provider direction. Terminal outcomes: DONE when all safe live items are processed and manifest evidence is current; NOOP when an item needs no action after live check; NEEDS_HUMAN or UNSAFE for risk-bound/security/UX-decision items; BLOCKED for external author/rebase/CI or upstream dependency; BUDGET_EXHAUSTED only if explicit runtime bounds are hit. Verification: gh live snapshots, code/diff review for candidate PRs, CI/check URLs where actions occur, comments/merge/close URLs for external state changes, and devlog evidence committed locally before completion.",
   "slug": "opencodex-live-unfinished-issues-and-prs-triage",
   "createdAt": "2026-07-27T10:35:02.724Z",
-  "updatedAt": "2026-07-27T13:07:59.498Z",
+  "updatedAt": "2026-07-27T14:05:45.000Z",
   "activeWorkPhaseId": null,
   "workPhases": [
     {
@@ -289,6 +289,26 @@
       "criteriaIds": [
         "C-WP12-PR551-ISSUE549"
       ]
+    },
+    {
+      "id": "WP13",
+      "title": "PR #555 / Issue #521 web-search SSE heartbeat triage",
+      "status": "done",
+      "tasks": [
+        {
+          "id": "WP13-T1",
+          "title": "Re-check PR #555 and issue #521 live state, reviews, checks, diff, and dev ancestry",
+          "status": "done"
+        },
+        {
+          "id": "WP13-T2",
+          "title": "Independently audit the heartbeat fix and decide merge, takeover-fix, request-changes, or blocker for this PR only",
+          "status": "done"
+        }
+      ],
+      "criteriaIds": [
+        "C-WP13-PR555-ISSUE521"
+      ]
     }
   ],
   "criteria": [
@@ -381,6 +401,13 @@
       "scenario": "PR #551 / Issue #549 custom image relay provider bug is merged, fixed, or has a precise blocker/request-changes decision.",
       "expectedEvidence": "live PR/issue state, review/check evidence, code pointers, independent audit, and merge/comment/close URL if external state changes.",
       "capturedEvidence": "WP12 completed by cxc D on 2026-07-27. PR #551 live state was rechecked through gh at current head f51b64ae281091b0e4580e02f42b44d55af3ea2b, base dev 261abb7ff7826f82713e0ae033ab930cb78923f7, mergeable MERGEABLE. Original owner blockers at 35fb1f8b were independently verified by Plato and already fixed by contributor head 050347f1: Bearer OpenCodex admission works for explicit keyed Images providers without forwarding the proxy secret, and unsupported multipart docs were narrowed to JSON Images requests. CodeRabbit then found one valid current-head blocker on ab652aff: invalid explicit images.provider plus Bearer admission should return 400 configuration error before forward-admission 401. Local equivalent takeover patch moved candidates.error before validateForwardAdmissionCredential and added the non-loopback Bearer regression; Peirce reviewer returned VERDICT: PASS. Local focused verification passed: bun test tests/server-images.test.ts 28 pass/0 fail, bun x tsc --noEmit pass, bun run privacy:scan pass, git diff --check pass. Local pre-push equivalent full gate passed before safe force-with-lease rejection: root tests 5066 pass/0 fail, GUI lint pass, privacy pass, React Doctor no issues. The PR author concurrently pushed the same behavioral fix as f51b64ae; force-with-lease rejected overwriting the moved branch, and remote head f51b64ae was verified instead: git merge-base --is-ancestor origin/dev HEAD exit 0, bun test tests/server-images.test.ts 28 pass/0 fail, bun x tsc --noEmit pass, bun run privacy:scan pass, git diff --check origin/dev...HEAD pass. PR #551 was merged with --match-head-commit f51b64ae into dev at merge commit 14ae6fe991c3b2e3517336d23dc8b4a393a6b565: https://github.com/lidge-jun/opencodex/pull/551. Issue #549 was closed with fix evidence after merge: https://github.com/lidge-jun/opencodex/issues/549.",
+      "status": "met"
+    },
+    {
+      "id": "C-WP13-PR555-ISSUE521",
+      "scenario": "PR #555 / Issue #521 web-search SSE heartbeat bug is merged, fixed, or has a precise blocker/request-changes decision.",
+      "expectedEvidence": "live PR/issue state, review/check evidence, code pointers, independent audit, and merge/comment/close URL if external state changes.",
+      "capturedEvidence": "WP13 completed on 2026-07-27. Live PR #555 was a non-draft bugfix PR against dev. Original head 953eaf92e89e9d6dda75d229a694f83be7d2264a was mergeable but stale by 60 commits relative to origin/dev, so it was rebased onto origin/dev 14ae6fe991c3b2e3517336d23dc8b4a393a6b565 and pushed with force-with-lease as d2bef1345f6f14de22902d365191bb8f3fa352e9. The diff changed only src/bridge.ts and tests/bridge.test.ts, separating upstreamActivity from wireActivity so invisible adapter heartbeats reset only the stall watchdog while parser-ignored response.heartbeat frames continue during client-visible wire silence. Local focused verification on rebased head passed: git diff --check origin/dev...HEAD, bun test tests/bridge.test.ts = 46 pass/0 fail/129 assertions, bun x tsc --noEmit, and bun run privacy:scan. Pre-push full gate passed: typecheck, GUI lint, root tests 5067 pass/0 fail/24942 assertions, privacy scan, and React Doctor no issues. Independent Sol audit returned VERDICT: MERGE and noted no auth/security surface changed. Hosted checks on d2bef134 all passed: CodeRabbit, enforce-target, label, react-doctor, ubuntu-latest, windows-latest, macos-latest after rerun, and npm-global ubuntu/windows/macos. The initial macos-latest attempt had one unrelated timeout in tests/cursor-native-exec-shell.test.ts, then reran green. PR #555 was squash-merged into dev with --match-head-commit d2bef134 as df57bd96025ea322321a16b504f95eb7bfb42026: https://github.com/lidge-jun/opencodex/pull/555. Issue #521 remained open after merge and was manually closed with fix evidence: https://github.com/lidge-jun/opencodex/issues/521. Devlog evidence: devlog/_plan/260727_live_unfinished_triage/025_pr555_web_search_heartbeat.md.",
       "status": "met"
     }
   ],
