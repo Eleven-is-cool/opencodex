@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { loadServiceTokenFromFile, serviceApiTokenFilePath } from "../src/lib/service-secrets";
 import {
   OPENCODE_API_KEY_ENV,
   OPENCODE_API_KEY_ENV_REF,
@@ -20,6 +21,7 @@ import {
   opencodeNotFoundHint,
   opencodeProviderOverridePath,
   opencodeProxyBaseUrl,
+  opencodeProxyStartEnv,
   parseJsonc,
   projectConfigOverridesProvider,
   serializeOpencodeRuntimeConfig,
@@ -358,6 +360,36 @@ describe("ocx opencode admission key", () => {
 
   test("falls back to a placeholder on an open loopback proxy", () => {
     expect(opencodeApiKey(cfg(), {})).toBe("ocx");
+  });
+});
+
+describe("ocx opencode proxy auto-start env", () => {
+  test("passes OCX_API_TOKEN_FILE to ocx start when only the hardened service token exists", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ocx-opencode-start-"));
+    const tokenFile = join(dir, "service-api-token");
+    writeFileSync(tokenFile, "sk-service-only\n", "utf8");
+    const config = cfg({ hostname: "0.0.0.0", apiKeys: [] as OcxConfig["apiKeys"] });
+
+    const startEnv = opencodeProxyStartEnv({ OCX_API_TOKEN_FILE: tokenFile });
+    expect(startEnv.OPENCODEX_API_AUTH_TOKEN).toBeUndefined();
+    expect(startEnv.OCX_API_TOKEN_FILE).toBe(tokenFile);
+    expect(startEnv.OCX_SERVICE).toBe("1");
+    expect(JSON.stringify(startEnv)).not.toContain("sk-service-only");
+    expect(loadServiceTokenFromFile(startEnv)).toBe("sk-service-only");
+    expect(opencodeApiKey(config, startEnv)).toBe("sk-service-only");
+  });
+
+  test("defaults OCX_API_TOKEN_FILE when admission env token is absent", () => {
+    const startEnv = opencodeProxyStartEnv({ hostname: "0.0.0.0" });
+    expect(startEnv.OPENCODEX_API_AUTH_TOKEN).toBeUndefined();
+    expect(startEnv.OCX_API_TOKEN_FILE).toBe(serviceApiTokenFilePath());
+    expect(startEnv.OCX_SERVICE).toBe("1");
+  });
+
+  test("does not inject OCX_API_TOKEN_FILE when OPENCODEX_API_AUTH_TOKEN is already set", () => {
+    const startEnv = opencodeProxyStartEnv({ OPENCODEX_API_AUTH_TOKEN: "sk-env", hostname: "0.0.0.0" });
+    expect(startEnv.OPENCODEX_API_AUTH_TOKEN).toBe("sk-env");
+    expect(startEnv.OCX_API_TOKEN_FILE).toBeUndefined();
   });
 });
 

@@ -406,6 +406,18 @@ function serviceTokenLookupEnv(env: OpencodeLaunchEnv): OpencodeLaunchEnv {
 }
 
 /**
+ * Child env for a detached `ocx start` from `ocx opencode`. When the admission token is
+ * not already in the environment, pass through an existing `OCX_API_TOKEN_FILE` or the
+ * default hardened service token path so `handleStart` can load it before bind.
+ */
+export function opencodeProxyStartEnv(base: OpencodeLaunchEnv = process.env): OpencodeLaunchEnv {
+  const withTokenFile = base.OPENCODEX_API_AUTH_TOKEN?.trim()
+    ? base
+    : serviceTokenLookupEnv(base);
+  return { ...withTokenFile, OCX_SERVICE: "1" };
+}
+
+/**
  * Env assembly (unit-tested). Inherited inline config is merged and only
  * `provider.opencodex` is replaced; disk config layers stay untouched. The admission
  * key travels in the child env rather than in the inline config payload.
@@ -445,7 +457,7 @@ async function ensureProxyForOpencode(config: OcxConfig): Promise<LiveProxy | nu
     detached: true,
     stdio: "ignore",
     windowsHide: true,
-    env: { ...process.env, OCX_SERVICE: "1" },
+    env: opencodeProxyStartEnv(process.env) as NodeJS.ProcessEnv,
   });
   // Without a listener an 'error' (bad argv[1], EMFILE, AV denial) throws synchronously
   // and kills this process; the health poll below already reports the failure properly.
