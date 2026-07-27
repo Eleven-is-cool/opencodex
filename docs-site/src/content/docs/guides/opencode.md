@@ -44,20 +44,30 @@ and overrides only conflicting keys for the child process.
 | Inline runtime (`OPENCODE_CONFIG_CONTENT`) | Receives only the generated `provider.opencodex` block |
 | Relative `{file:…}` paths | Still resolve against the config file that originally defined them |
 
-If a project config also defines `provider.opencodex`, the launcher prints an
+If a global or project config also defines `provider.opencodex`, the launcher prints an
 informational note: the runtime layer from `ocx opencode` overrides it for that launch.
 
 ## The admission key is not written to disk
 
 When the proxy requires an API key, the inline runtime config carries opencode's
-`{env:…}` reference rather than the secret. Non-loopback binds also send
-`x-opencodex-api-key` from the same env var so proxy admission stays separate from any
-upstream Authorization header:
+`{env:…}` reference rather than the secret. Loopback binds use that reference as
+`apiKey`; non-loopback binds send it only through `x-opencodex-api-key` so proxy
+admission stays separate from any upstream `Authorization` header.
+
+Loopback example:
 
 ```json
 "options": {
   "baseURL": "http://127.0.0.1:10100/v1",
-  "apiKey": "{env:OPENCODEX_OPENCODE_API_KEY}",
+  "apiKey": "{env:OPENCODEX_OPENCODE_API_KEY}"
+}
+```
+
+Non-loopback example:
+
+```json
+"options": {
+  "baseURL": "http://192.168.1.10:10100/v1",
   "headers": {
     "x-opencodex-api-key": "{env:OPENCODEX_OPENCODE_API_KEY}"
   }

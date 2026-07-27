@@ -68,10 +68,11 @@ describe("ocx opencode provider block", () => {
       cfg({ hostname: "0.0.0.0" }),
     );
     expect(block.options.headers).toEqual({ "x-opencodex-api-key": OPENCODE_API_KEY_ENV_REF });
-    expect(JSON.stringify(block.options.headers)).not.toContain("sk-");
+    expect(block.options.apiKey).toBeUndefined();
+    expect(JSON.stringify(block.options)).not.toContain("sk-");
   });
 
-  test("loopback binds omit the dedicated admission header", () => {
+  test("loopback binds use apiKey and omit the dedicated admission header", () => {
     const block = buildOpencodeProviderBlock(
       10100,
       [],
@@ -80,6 +81,7 @@ describe("ocx opencode provider block", () => {
       "127.0.0.1",
       cfg({ hostname: "127.0.0.1" }),
     );
+    expect(block.options.apiKey).toBe(OPENCODE_API_KEY_ENV_REF);
     expect(block.options.headers).toBeUndefined();
   });
 

@@ -52,7 +52,7 @@ export interface OpencodeProviderBlock {
   name: string;
   options: {
     baseURL: string;
-    apiKey: string;
+    apiKey?: string;
     headers?: Record<string, string>;
   };
   models: Record<string, OpencodeModelEntry>;
@@ -102,6 +102,14 @@ export const OPENCODE_API_KEY_ENV = "OPENCODEX_OPENCODE_API_KEY";
  * output > context.
  */
 export const SCHEMA_REQUIRED_OUTPUT_BUDGET = 32_000;
+
+/** Deterministic loopback default for exported provider-block helpers in tests. */
+export const OPENCODE_PROVIDER_BLOCK_DEFAULT_CONFIG: OcxConfig = {
+  port: 10100,
+  hostname: "127.0.0.1",
+  defaultProvider: "mock",
+  providers: { mock: { adapter: "openai-chat", baseUrl: "http://127.0.0.1/v1" } },
+} as OcxConfig;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -225,15 +233,14 @@ export function opencodeLaunchNativeSlugs(config: OcxConfig): string[] {
 }
 
 function opencodeProviderOptions(baseURL: string, config: OcxConfig): OpencodeProviderBlock["options"] {
-  const options: OpencodeProviderBlock["options"] = {
-    baseURL,
-    apiKey: OPENCODE_API_KEY_ENV_REF,
-  };
+  const options: OpencodeProviderBlock["options"] = { baseURL };
   // Non-loopback binds accept proxy admission only via x-opencodex-api-key so Authorization
   // stays free for Codex Direct upstream credentials when applicable.
   if (shouldInjectApiAuthHeader(config)) {
     options.headers = { "x-opencodex-api-key": OPENCODE_API_KEY_ENV_REF };
+    return options;
   }
+  options.apiKey = OPENCODE_API_KEY_ENV_REF;
   return options;
 }
 
@@ -251,7 +258,7 @@ export function buildOpencodeProviderBlock(
   routedModels: readonly OpencodeRoutedModel[],
   nativeContextWindow: (slug: string) => number | undefined = () => undefined,
   hostname?: string,
-  config?: OcxConfig,
+  config: OcxConfig = OPENCODE_PROVIDER_BLOCK_DEFAULT_CONFIG,
 ): OpencodeProviderBlock {
   const models: Record<string, OpencodeModelEntry> = {};
   const candidates: OpencodeRoutedModel[] = [
@@ -273,7 +280,7 @@ export function buildOpencodeProviderBlock(
   return {
     npm: OPENCODE_PROVIDER_NPM,
     name: "OpenCodex",
-    options: opencodeProviderOptions(opencodeProxyBaseUrl(port, hostname), config ?? loadConfig()),
+    options: opencodeProviderOptions(opencodeProxyBaseUrl(port, hostname), config),
     models,
   };
 }
@@ -331,7 +338,7 @@ export function buildOpencodeConfig(
   routedModels: readonly OpencodeRoutedModel[],
   nativeContextWindow: (slug: string) => number | undefined = () => undefined,
   hostname?: string,
-  config?: OcxConfig,
+  config: OcxConfig = OPENCODE_PROVIDER_BLOCK_DEFAULT_CONFIG,
 ): OpencodeGeneratedConfig {
   const merged = mergeOpencodeRuntimeConfig(
     undefined,
