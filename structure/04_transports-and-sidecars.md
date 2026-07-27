@@ -87,17 +87,19 @@ conflicts with `modelSupportsReasoningSummaries: false` for the same model.
 
 The Desktop profile writer and management status probe share
 `resolveDesktop3pConfigLibraryPath`. Explicit opencodex and Claude user-data overrides win; otherwise
-the resolver follows Electron's platform user-data convention under the `Claude` application
-directory. The retired hardcoded `Claude-3p` path is neither read nor migrated implicitly, so the
-status endpoint cannot report a self-consistent file that Desktop never sees.
+the resolver follows Claude Desktop's 3P user-data convention: macOS and Linux append `-3p` to
+Electron's `Claude` user-data root, Windows prefers `%LOCALAPPDATA%\Claude-3p`, and
+`CLAUDE_USER_DATA_DIR` is used verbatim without adding the suffix. The old non-3P
+`Claude/configLibrary` path is neither read nor migrated implicitly, so the status endpoint cannot
+report a self-consistent file that Desktop never sees.
 
 [Decision Log]
 - 목적과 의도: Make the generated Claude Desktop profile land in the directory the installed Desktop application actually reads and keep dashboard status consistent with that write target.
-- 기존 구현 및 제약 조건: Both callers duplicated a macOS-only `Claude-3p` fallback, which made their internal status agree while Electron used `Claude/configLibrary`; users may also set explicit profile roots.
+- 기존 구현 및 제약 조건: Both callers duplicated a partial path rule and could write to a location that matched their own status probe while Desktop's 3P `GE()` resolver read another platform-specific root; users may also set explicit profile roots.
 - 검토한 주요 대안: Rename only the CLI fallback; scan both directories; move or delete legacy files automatically; centralize a cross-platform resolver.
 - 선택한 방식: Centralize override-aware macOS, Windows, and Linux resolution and use it for both write and status paths without destructive migration.
-- 다른 대안 대신 이 방식을 선택한 이유: One resolver prevents drift, platform defaults match Electron, and leaving the legacy directory untouched avoids deleting user data or guessing which copy should win.
-- 장점, 단점 및 영향: New applies become visible to Desktop on every supported platform; old `Claude-3p` files remain harmless and users with nonstandard layouts must use the documented override.
+- 다른 대안 대신 이 방식을 선택한 이유: One resolver prevents drift, platform defaults match Desktop's 3P Electron resolver, and leaving old non-3P directories untouched avoids deleting user data or guessing which copy should win.
+- 장점, 단점 및 영향: New applies become visible to Desktop on every supported platform; old `Claude/configLibrary` files remain harmless and users with nonstandard layouts must use the documented override.
 
 ## Cursor Native Exec
 
