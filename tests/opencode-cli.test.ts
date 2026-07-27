@@ -308,6 +308,27 @@ describe("ocx opencode proxy model catalog", () => {
     }
   });
 
+  test("fetchOpencodeProxyModels aborts stalled /api/models fetch and body reads", async () => {
+    const live = { port: 10100, hostname: "127.0.0.1", pid: 1 };
+    const stall = (init?: RequestInit) => new Promise<Response>((_, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new DOMException("The operation was aborted.", "AbortError")));
+    });
+
+    await expect(fetchOpencodeProxyModels(live, "sk-mgmt", {
+      timeoutMs: 25,
+      fetchImpl: async (_url, init) => stall(init),
+    })).rejects.toThrow("Management API timed out while fetching /api/models.");
+
+    await expect(fetchOpencodeProxyModels(live, "sk-mgmt", {
+      timeoutMs: 25,
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        text: () => new Promise<string>(() => {}),
+      } as Response),
+    })).rejects.toThrow("Management API timed out while fetching /api/models.");
+  });
+
   test("opencodeCatalogFromProxyRows omits disabled and direct-mode native rows", () => {
     const directConfig = cfg({
       providers: {

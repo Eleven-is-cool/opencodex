@@ -338,27 +338,55 @@ export function buildOpencodeProviderBlock(
   return buildOpencodeProviderBlockFromCatalog(port, catalog, hostname, config);
 }
 
+/** Default deadline for authenticated GET /api/models during `ocx opencode` launch. */
+export const OPENCODE_PROXY_MODELS_TIMEOUT_MS = 8_000;
+
 /** Fetch the live model catalog from a running proxy's management API. */
 export async function fetchOpencodeProxyModels(
   live: LiveProxy,
   apiKey: string,
-  deps: { fetchImpl?: typeof fetch } = {},
+  deps: { fetchImpl?: typeof fetch; timeoutMs?: number } = {},
 ): Promise<OpencodeProxyModelRow[]> {
   const baseUrl = `http://${probeHostname(live.hostname)}:${live.port}`;
   const fetchImpl = deps.fetchImpl ?? fetch;
   const headers = new Headers({ Accept: "application/json" });
   const token = apiKey.trim();
   if (token) headers.set("X-OpenCodex-API-Key", token);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), deps.timeoutMs ?? OPENCODE_PROXY_MODELS_TIMEOUT_MS);
+  const abortIfTimedOut = (): Promise<never> => new Promise((_, reject) => {
+    if (controller.signal.aborted) {
+      reject(new DOMException("The operation was aborted.", "AbortError"));
+      return;
+    }
+    controller.signal.addEventListener(
+      "abort",
+      () => reject(new DOMException("The operation was aborted.", "AbortError")),
+      { once: true },
+    );
+  });
 
   let response: Response;
+  let text: string;
   try {
-    response = await fetchImpl(`${baseUrl}/api/models`, { headers });
+    response = await Promise.race([
+      fetchImpl(`${baseUrl}/api/models`, {
+        headers,
+        signal: controller.signal,
+      }),
+      abortIfTimedOut(),
+    ]);
+    text = await Promise.race([response.text(), abortIfTimedOut()]);
   } catch (error) {
+    const timedOut = error instanceof Error && error.name === "AbortError";
     throw new Error(
-      `Management API is unreachable: ${error instanceof Error ? error.message : String(error)}`,
+      timedOut
+        ? "Management API timed out while fetching /api/models."
+        : `Management API is unreachable: ${error instanceof Error ? error.message : String(error)}`,
     );
+  } finally {
+    clearTimeout(timeout);
   }
-  const text = await response.text();
   let body: unknown = null;
   if (text) {
     try { body = JSON.parse(text); }
