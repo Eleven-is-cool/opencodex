@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { clearModelCache } from "../src/codex/model-cache";
 import { loadServiceTokenFromFile, serviceApiTokenFilePath } from "../src/lib/service-secrets";
 import {
   OPENCODE_API_KEY_ENV,
@@ -12,9 +13,12 @@ import {
   buildOpencodeConfig,
   buildOpencodeEnv,
   buildOpencodeProviderBlock,
+  buildOpencodeProviderBlockFromCatalog,
+  fetchOpencodeProxyModels,
   isOpencodeRuntimeConfigError,
   mergeOpencodeRuntimeConfig,
   opencodeApiKey,
+  opencodeCatalogFromProxyRows,
   opencodeGlobalConfigPath,
   opencodeLaunchNativeSlugs,
   opencodeModelKey,
@@ -208,6 +212,136 @@ describe("ocx opencode JSONC parsing", () => {
 
   test("genuinely malformed input still throws", () => {
     expect(() => parseJsonc("{ not json")).toThrow();
+  });
+});
+
+describe("ocx opencode proxy model catalog", () => {
+  const ENV_KEY = "OCX_TEST_OPENCODE_PROXY_ONLY_KEY";
+  const RESOLVED = "proxy-only-resolved-key";
+  const PROVIDER = "proxyenv";
+
+  test("uses /api/models namespaced selectors and resolves env-backed provider keys only in the proxy", async () => {
+    const originalFetch = globalThis.fetch;
+    let requestedAuth: string | undefined;
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      const target = String(url);
+      if (target.includes("proxyenv.test")) {
+        requestedAuth = new Headers(init?.headers).get("authorization") ?? undefined;
+        if (requestedAuth === `Bearer ${RESOLVED}`) {
+          return new Response(JSON.stringify({
+            data: [{ id: "live-via-proxy-env", context_length: 128_000 }],
+          }), { status: 200, headers: { "content-type": "application/json" } });
+        }
+        return new Response("unauthorized", { status: 401 });
+      }
+      return originalFetch(url, init);
+    }) as typeof fetch;
+
+    const config = {
+      port: 10100,
+      defaultProvider: PROVIDER,
+      providers: {
+        [PROVIDER]: {
+          adapter: "openai-chat",
+          authMode: "key",
+          baseUrl: "https://proxyenv.test/v1",
+          apiKey: `\${${ENV_KEY}}`,
+          models: ["static-fallback"],
+        },
+      },
+    } as OcxConfig;
+
+    const previous = process.env[ENV_KEY];
+    delete process.env[ENV_KEY];
+    clearModelCache(PROVIDER);
+    try {
+      const { fetchAllModels } = await import("../src/server/management/shared");
+      const cliModels = await fetchAllModels(config);
+      const cliIds = cliModels.filter(m => m.provider === PROVIDER).map(m => m.id).sort();
+      expect(cliIds).toEqual(["static-fallback"]);
+      expect(cliIds).not.toContain("live-via-proxy-env");
+
+      process.env[ENV_KEY] = RESOLVED;
+      clearModelCache(PROVIDER);
+      requestedAuth = undefined;
+
+      const { handleManagementAPI } = await import("../src/server/management-api");
+      const modelsRes = await handleManagementAPI(
+        new Request("http://localhost/api/models"),
+        new URL("http://localhost/api/models"),
+        config,
+      );
+      const rows = await modelsRes!.json() as Array<{
+        namespaced?: string;
+        contextWindow?: number;
+      }>;
+      expect(requestedAuth).toBe(`Bearer ${RESOLVED}`);
+
+      const liveRow = rows.find(r => r.namespaced === `${PROVIDER}/live-via-proxy-env`);
+      expect(liveRow).toBeTruthy();
+      expect(liveRow?.contextWindow).toBe(128_000);
+
+      const catalog = opencodeCatalogFromProxyRows(rows, config);
+      expect(catalog.map(m => m.namespaced)).toContain(`${PROVIDER}/live-via-proxy-env`);
+
+      const block = buildOpencodeProviderBlockFromCatalog(10100, catalog, undefined, config);
+      expect(block.models[`${PROVIDER}/live-via-proxy-env`]?.limit?.context).toBe(128_000);
+      expect(block.models[`${PROVIDER}/live-via-proxy-env`]?.name).toBe("live-via-proxy-env (proxyenv)");
+
+      const fetched = await fetchOpencodeProxyModels(
+        { port: 10100, hostname: "127.0.0.1", pid: 1 },
+        "sk-mgmt",
+        {
+          fetchImpl: async (url, init) => {
+            expect(String(url)).toBe("http://127.0.0.1:10100/api/models");
+            expect(new Headers(init?.headers).get("X-OpenCodex-API-Key")).toBe("sk-mgmt");
+            return new Response(JSON.stringify(rows), { status: 200 });
+          },
+        },
+      );
+      expect(fetched.find(r => r.namespaced === `${PROVIDER}/live-via-proxy-env`)).toBeTruthy();
+    } finally {
+      globalThis.fetch = originalFetch;
+      clearModelCache(PROVIDER);
+      if (previous === undefined) delete process.env[ENV_KEY];
+      else process.env[ENV_KEY] = previous;
+    }
+  });
+
+  test("opencodeCatalogFromProxyRows omits disabled and direct-mode native rows", () => {
+    const directConfig = cfg({
+      providers: {
+        mock: { adapter: "openai-chat", baseUrl: "http://x/v1" },
+        openai: {
+          adapter: "openai-responses",
+          baseUrl: "https://chatgpt.com/backend-api/codex",
+          authMode: "forward",
+          codexAccountMode: "direct",
+        },
+      },
+    });
+    const rows = [
+      { namespaced: "gpt-5.6-sol", native: true, disabled: false, provider: "openai", id: "gpt-5.6-sol" },
+      { namespaced: "gpt-5.5", native: true, disabled: true, provider: "openai", id: "gpt-5.5" },
+      { namespaced: "kiro/glm-5", native: false, disabled: false, provider: "kiro", id: "glm-5", displayName: "GLM-5" },
+    ];
+    expect(opencodeCatalogFromProxyRows(rows, directConfig).map(m => m.namespaced)).toEqual(["kiro/glm-5"]);
+
+    const poolConfig = cfg({
+      providers: {
+        mock: { adapter: "openai-chat", baseUrl: "http://x/v1" },
+        openai: {
+          adapter: "openai-responses",
+          baseUrl: "https://chatgpt.com/backend-api/codex",
+          authMode: "forward",
+          codexAccountMode: "pool",
+        },
+      },
+    });
+    expect(opencodeCatalogFromProxyRows(rows, poolConfig).map(m => m.namespaced)).toEqual([
+      "gpt-5.6-sol",
+      "kiro/glm-5",
+    ]);
   });
 });
 

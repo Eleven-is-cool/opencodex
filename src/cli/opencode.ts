@@ -42,6 +42,27 @@ export interface OpencodeRoutedModel {
   displayName?: string;
 }
 
+/** Row shape from authenticated GET /api/models on the running proxy. */
+export interface OpencodeProxyModelRow {
+  provider?: string;
+  id?: string;
+  namespaced?: string;
+  native?: boolean;
+  disabled?: boolean;
+  displayName?: string;
+  contextWindow?: number;
+}
+
+/** Visible catalog entry keyed by the proxy's canonical namespaced selector. */
+export interface OpencodeCatalogModel {
+  namespaced: string;
+  native?: boolean;
+  provider?: string;
+  id?: string;
+  contextWindow?: number;
+  displayName?: string;
+}
+
 export interface OpencodeModelEntry {
   name: string;
   limit?: { context: number; output: number };
@@ -244,33 +265,36 @@ function opencodeProviderOptions(baseURL: string, config: OcxConfig): OpencodePr
   return options;
 }
 
+function opencodeModelEntryLabel(model: OpencodeCatalogModel): string {
+  const providerLabel = model.native ? "native" : (model.provider ?? "routed");
+  const id = model.id ?? model.namespaced;
+  if (model.displayName && model.displayName.length > 0) {
+    return `${model.displayName} (${providerLabel})`;
+  }
+  return `${id} (${providerLabel})`;
+}
+
 /**
- * Build the `opencodex` provider block from the proxy's visible catalog.
+ * Build the `opencodex` provider block from proxy catalog rows keyed by each row's
+ * canonical `namespaced` selector.
  *
  * `limit.context` is emitted ONLY from an authoritative context window — never guessed.
  * When none is available the whole `limit` block is dropped and opencode keeps its own
  * defaults; when one is present, `limit.output` rides along (opencode's schema requires
  * the pair) clamped to the context window.
  */
-export function buildOpencodeProviderBlock(
+export function buildOpencodeProviderBlockFromCatalog(
   port: number,
-  nativeSlugs: readonly string[],
-  routedModels: readonly OpencodeRoutedModel[],
-  nativeContextWindow: (slug: string) => number | undefined = () => undefined,
+  catalogModels: readonly OpencodeCatalogModel[],
   hostname?: string,
   config: OcxConfig = OPENCODE_PROVIDER_BLOCK_DEFAULT_CONFIG,
 ): OpencodeProviderBlock {
   const models: Record<string, OpencodeModelEntry> = {};
-  const candidates: OpencodeRoutedModel[] = [
-    ...nativeSlugs.map(id => ({ provider: "native", id, contextWindow: nativeContextWindow(id) })),
-    ...routedModels,
-  ];
-  for (const { provider, id, contextWindow, displayName } of candidates) {
-    const key = opencodeModelKey(provider, id);
-    if (models[key]) continue; // first entry wins; native slugs are registered first
-    const entry: OpencodeModelEntry = {
-      name: displayName && displayName.length > 0 ? `${displayName} (${provider})` : `${id} (${provider})`,
-    };
+  for (const model of catalogModels) {
+    const key = model.namespaced;
+    if (models[key]) continue; // first entry wins; native rows lead /api/models
+    const entry: OpencodeModelEntry = { name: opencodeModelEntryLabel(model) };
+    const { contextWindow } = model;
     if (typeof contextWindow === "number" && Number.isFinite(contextWindow) && contextWindow > 0) {
       const context = Math.floor(contextWindow);
       entry.limit = { context, output: Math.min(SCHEMA_REQUIRED_OUTPUT_BUDGET, context) };
@@ -283,6 +307,102 @@ export function buildOpencodeProviderBlock(
     options: opencodeProviderOptions(opencodeProxyBaseUrl(port, hostname), config),
     models,
   };
+}
+
+/** Back-compat helper for unit tests that assemble slugs/routed rows directly. */
+export function buildOpencodeProviderBlock(
+  port: number,
+  nativeSlugs: readonly string[],
+  routedModels: readonly OpencodeRoutedModel[],
+  nativeContextWindow: (slug: string) => number | undefined = () => undefined,
+  hostname?: string,
+  config: OcxConfig = OPENCODE_PROVIDER_BLOCK_DEFAULT_CONFIG,
+): OpencodeProviderBlock {
+  const catalog: OpencodeCatalogModel[] = [
+    ...nativeSlugs.map(id => ({
+      namespaced: id,
+      native: true,
+      provider: "openai",
+      id,
+      contextWindow: nativeContextWindow(id),
+    })),
+    ...routedModels.map(model => ({
+      namespaced: opencodeModelKey(model.provider, model.id),
+      native: false,
+      provider: model.provider,
+      id: model.id,
+      contextWindow: model.contextWindow,
+      displayName: model.displayName,
+    })),
+  ];
+  return buildOpencodeProviderBlockFromCatalog(port, catalog, hostname, config);
+}
+
+/** Fetch the live model catalog from a running proxy's management API. */
+export async function fetchOpencodeProxyModels(
+  live: LiveProxy,
+  apiKey: string,
+  deps: { fetchImpl?: typeof fetch } = {},
+): Promise<OpencodeProxyModelRow[]> {
+  const baseUrl = `http://${probeHostname(live.hostname)}:${live.port}`;
+  const fetchImpl = deps.fetchImpl ?? fetch;
+  const headers = new Headers({ Accept: "application/json" });
+  const token = apiKey.trim();
+  if (token) headers.set("X-OpenCodex-API-Key", token);
+
+  let response: Response;
+  try {
+    response = await fetchImpl(`${baseUrl}/api/models`, { headers });
+  } catch (error) {
+    throw new Error(
+      `Management API is unreachable: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const text = await response.text();
+  let body: unknown = null;
+  if (text) {
+    try { body = JSON.parse(text); }
+    catch { body = text; }
+  }
+  if (!response.ok) {
+    const message = body && typeof body === "object" && typeof (body as Record<string, unknown>).error === "string"
+      ? (body as Record<string, string>).error
+      : `Management request failed (${response.status})`;
+    throw new Error(message);
+  }
+  if (!Array.isArray(body)) {
+    throw new Error("Management API returned an unexpected /api/models payload.");
+  }
+  return body as OpencodeProxyModelRow[];
+}
+
+/**
+ * Visible OpenCode catalog entries from proxy /api/models rows. Disabled rows are omitted;
+ * native rows are omitted in Codex Direct mode.
+ */
+export function opencodeCatalogFromProxyRows(
+  rows: readonly OpencodeProxyModelRow[],
+  config: OcxConfig,
+): OpencodeCatalogModel[] {
+  const omitNative = providerCodexAccountMode("openai", config.providers?.openai) === "direct";
+  const seen = new Set<string>();
+  const catalog: OpencodeCatalogModel[] = [];
+  for (const row of rows) {
+    const namespaced = row.namespaced?.trim();
+    if (!namespaced || row.disabled === true) continue;
+    if (omitNative && row.native === true) continue;
+    if (seen.has(namespaced)) continue;
+    seen.add(namespaced);
+    catalog.push({
+      namespaced,
+      native: row.native === true,
+      provider: row.provider,
+      id: row.id,
+      contextWindow: row.contextWindow,
+      displayName: row.displayName,
+    });
+  }
+  return catalog;
 }
 
 export type OpencodeRuntimeConfigError = { error: string };
@@ -502,34 +622,24 @@ export async function cmdOpencode(args: string[]): Promise<number> {
     return 1;
   }
 
-  const { fetchAllModels } = await import("../server/management-api");
-  const { filterCatalogVisibleModels, nativeOpenAiContextWindow } = await import("../codex/catalog");
-  let allModels: Awaited<ReturnType<typeof fetchAllModels>>;
+  const apiKey = opencodeApiKey(config);
+  let proxyModels: OpencodeProxyModelRow[];
   try {
-    allModels = await fetchAllModels(config);
+    proxyModels = await fetchOpencodeProxyModels(live, apiKey);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     console.error(`❌ Could not fetch the model catalog from the proxy: ${reason}`);
     return 1;
   }
-  const routed = filterCatalogVisibleModels(allModels, config).map(m => ({
-    provider: m.provider,
-    id: m.id,
-    contextWindow: m.contextWindow,
-    displayName: m.displayName,
-  }));
-  const nativeSlugs = opencodeLaunchNativeSlugs(config);
-
-  const providerBlock = buildOpencodeProviderBlock(
+  const catalog = opencodeCatalogFromProxyRows(proxyModels, config);
+  const providerBlock = buildOpencodeProviderBlockFromCatalog(
     live.port,
-    nativeSlugs,
-    routed,
-    nativeOpenAiContextWindow,
+    catalog,
     live.hostname,
     config,
   );
   const baseUrl = providerBlock.options.baseURL;
-  const modelCount = nativeSlugs.length + routed.length;
+  const modelCount = catalog.length;
   console.error(`✅ opencode wired to ${baseUrl} — ${modelCount} model(s) under provider \`${OPENCODE_PROVIDER_ID}\`.`);
   console.error("   Your existing opencode config files are left untouched; only the runtime provider block is injected.");
   const providerOverride = opencodeProviderOverridePath(process.cwd());
@@ -537,7 +647,7 @@ export async function cmdOpencode(args: string[]): Promise<number> {
     console.error(`ℹ ${providerOverride} also defines provider.${OPENCODE_PROVIDER_ID}; the runtime layer from ocx opencode overrides it for this launch.`);
   }
 
-  const builtEnv = buildOpencodeEnv(providerBlock, opencodeApiKey(config), process.env);
+  const builtEnv = buildOpencodeEnv(providerBlock, apiKey, process.env);
   if ("error" in builtEnv) {
     console.error(`❌ ${builtEnv.error}`);
     return 1;
