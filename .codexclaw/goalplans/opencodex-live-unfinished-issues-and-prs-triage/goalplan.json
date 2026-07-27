@@ -2,7 +2,7 @@
   "objective": "OpenCodex live unfinished issues and PRs triage against current GitHub state. Scope: repository lidge-jun/opencodex, dev target only, worktree <local-worktree>. First work-phase is docs-only manifest/devlog: fetch live open PRs and open issues via gh, record current number/title/state/base/head/mergeable/checks/reviews/labels, classify every item into merge now, takeover-fix, comment/request-changes, needs-author-rebase, needs-human/security, later/enhancement, upstream-tracking, or close, and produce a priority table. Later work-phases process exactly one PR or one issue per full PABCD cycle. Allowed: directly fix bugfix/simple safe items on dev, create PRs, wait for CI, squash merge, and close linked issues when live evidence proves safety. Out of scope: main/preview/release branches, automatic merge of security/auth/permission/data-migration/privilege-boundary work, and unapproved GUI/UX decisions except the approved OpenRouter Free separate-provider direction. Terminal outcomes: DONE when all safe live items are processed and manifest evidence is current; NOOP when an item needs no action after live check; NEEDS_HUMAN or UNSAFE for risk-bound/security/UX-decision items; BLOCKED for external author/rebase/CI or upstream dependency; BUDGET_EXHAUSTED only if explicit runtime bounds are hit. Verification: gh live snapshots, code/diff review for candidate PRs, CI/check URLs where actions occur, comments/merge/close URLs for external state changes, and devlog evidence committed locally before completion.",
   "slug": "opencodex-live-unfinished-issues-and-prs-triage",
   "createdAt": "2026-07-27T10:35:02.724Z",
-  "updatedAt": "2026-07-27T14:35:51.000Z",
+  "updatedAt": "2026-07-27T14:55:00.000Z",
   "activeWorkPhaseId": null,
   "workPhases": [
     {
@@ -329,6 +329,26 @@
       "criteriaIds": [
         "C-WP14-PR556"
       ]
+    },
+    {
+      "id": "WP15",
+      "title": "PR #533 npm cache update recovery triage",
+      "status": "done",
+      "tasks": [
+        {
+          "id": "WP15-T1",
+          "title": "Re-check PR #533 live draft/head/review/check state, unresolved review comments, diff, and dev ancestry",
+          "status": "done"
+        },
+        {
+          "id": "WP15-T2",
+          "title": "Decide whether PR #533 is takeover-fix, comment/request-changes, needs-author-rebase, needs-human/security, or hold",
+          "status": "done"
+        }
+      ],
+      "criteriaIds": [
+        "C-WP15-PR533"
+      ]
     }
   ],
   "criteria": [
@@ -435,6 +455,13 @@
       "scenario": "PR #556 bridge CodeRabbit follow-ups are merged, fixed, or held with precise blocker evidence.",
       "expectedEvidence": "live PR head/check/review state, diff/code pointers, independent audit, local verification output, hosted check evidence, and merge/comment URL if external state changes.",
       "capturedEvidence": "WP14 completed on 2026-07-27. PR #556 live triage started at head 8959f5e6f794c687cad45439cd310c050793851e, non-draft bugfix against dev and mergeable. Initial diff changed src/bridge.ts and tests/bridge.test.ts for omitted text_delta phase preservation, batch content_filter incomplete semantics, compaction exclusion, and adapter heartbeat filtering. Local exact-head verification on 8959f5e6 passed: git merge-base --is-ancestor origin/dev HEAD, git diff --check origin/dev...HEAD, bun test --isolate tests/bridge.test.ts tests/bridge-lifecycle.test.ts = 63 pass/0 fail/160 assertions, bun run typecheck, and bun run privacy:scan. Kepler independent Sol audit returned VERDICT: PASS with blockers 0 and no auth/security/data/permission surface. CodeRabbit then produced one valid actionable test gap; maintainer commit de8942f0cad5b7a8aef85f242e9ae02c2e47fe76 added the { compaction: true } content_filter assertion and was pushed to the PR branch after pre-push gates passed: typecheck, GUI lint, root tests 5069 pass/0 fail/24949 assertions, privacy scan, and React Doctor no issues. Contributor then pushed final head 18fade98c7d64ff3fc1adf1c21b40bd023526863, adding deterministic timer-seam heartbeat coverage. Final-head local verification passed: git diff --check origin/dev...HEAD, bun test --isolate tests/bridge.test.ts tests/bridge-lifecycle.test.ts = 63 pass/0 fail/162 assertions, bun run typecheck, and bun run privacy:scan. Kepler follow-up audit on 18fade98 returned VERDICT: PASS with blockers 0, timer seam production-safe, deterministic heartbeat/content_filter coverage, and no security/data boundary. Hosted checks on 18fade98 all passed: CodeRabbit, enforce-target, label, react-doctor, ubuntu-latest, macos-latest, windows-latest, and npm-global ubuntu/macos/windows. PR #556 https://github.com/lidge-jun/opencodex/pull/556 was squash-merged into dev at 2026-07-27T14:35:51Z as 800ebc93101f244a77dc61483d3de6741d5f7ca5. No linked issue was closed.",
+      "status": "met"
+    },
+    {
+      "id": "C-WP15-PR533",
+      "scenario": "PR #533 npm cache update recovery bugfix is either taken over safely, held with precise request-changes/rebase/security evidence, or classified for human review.",
+      "expectedEvidence": "live PR head/check/review state, unresolved comment summary, diff/code pointers, independent audit, local verification or hosted check evidence, and comment/merge URL if external state changes.",
+      "capturedEvidence": "WP15 completed on 2026-07-27. PR #533 live head at phase start was 2f21501e86a267f9112c6b165cdfbce085f14f7b, draft against dev with CHANGES_REQUESTED and only limited checks green. Latest origin/dev used for takeover rebase was 800ebc93101f244a77dc61483d3de6741d5f7ca5; before rebase the PR stack was behind/ahead 41/14 and after clean rebase was 0/14. Latest Wibias review comment https://github.com/lidge-jun/opencodex/pull/533#issuecomment-5091674612 had two accepted High blockers: same-UID cache ownership without effective access before proxy stop, and raw installer stdout/stderr/home/cache/uid data persisted in update-job.json. Medium nonzero installer recovery policy remains a maintainer decision. Epicurus independent audit classified the item as takeover-fix only for the two High blockers, with the medium item held for review. Maintainer takeover branch codex/pr533-update-recovery-hardening added commit d215cbeb9d712e123e3eebadd0ee5ef471747b03, adding effective fs.access checks in src/update/npm-cache-preflight.mjs, an injectable access seam in src/update/npm-cache-preflight.d.mts, persisted update-job sanitization in src/update/job.ts, and regressions in tests/update-npm-cache-preflight.test.ts and tests/update-job.test.ts. Local verification passed: targeted tests 70 pass/0 fail, focused update suite 162 pass/0 fail, bun x tsc --noEmit, git diff --check origin/dev...HEAD, and bun run privacy:scan. Pre-push full gate passed: typecheck, GUI lint, root tests 5127 pass/0 fail/25156 assertions, privacy scan, and React Doctor no issues. Volta post-patch audit returned PASS and confirmed the cache gate remains before proxy stop in CLI and npm launcher paths and persisted job fields are sanitized. Draft takeover PR opened as https://github.com/lidge-jun/opencodex/pull/557. Original PR #533 comment posted at https://github.com/lidge-jun/opencodex/pull/533#issuecomment-5092875364. Final classification is takeover-fix plus needs-human/security before merge; PR #533 remains open/draft and #557 is draft, not auto-merged.",
       "status": "met"
     }
   ],
