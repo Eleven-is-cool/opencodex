@@ -217,7 +217,7 @@ export default function ProviderAuthPanel({
                     )}
                     {showDoctor && (
                       <button type="button" className="btn btn-ghost btn-sm" onClick={copyDoctor}>
-                        {doctorCopyButtonLabel(t, doctorCopy.outcomeFor(account.id))}
+                        <span aria-live="polite">{doctorCopyButtonLabel(t, doctorCopy.outcomeFor(account.id))}</span>
                       </button>
                     )}
                     <button type="button" className="btn btn-ghost btn-sm"

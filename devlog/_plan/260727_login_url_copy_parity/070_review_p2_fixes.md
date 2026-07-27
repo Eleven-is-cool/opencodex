@@ -102,7 +102,7 @@ const copy = useCallback((text: string, scope: Scope) => {
 
 ### `gui/tests/provider-auth-device-code-copy.test.tsx` (기존에 추가)
 
-4. **기기 코드가 바뀌면 라벨이 초기화된다.** 코드 A 복사 → 같은 패널에
+1. **기기 코드가 바뀌면 라벨이 초기화된다.** 코드 A 복사 → 같은 패널에
    코드 B로 리렌더 → 라벨이 `prov.copyCode`로 돌아온다.
 
 ## 검증
@@ -111,4 +111,4 @@ const copy = useCallback((text: string, scope: Scope) => {
 - `cd gui && bun run lint` / `lint:i18n` exit 0
 - `cd gui && bun test tests` 전건 통과
 - `bun run test` (루트) 신규 실패 0, `bun run privacy:scan` 통과
-- 스코프를 `undefined`로 되돌리면 테스트 4가, 세대 가드를 지우면 1·2가 실패한다
+- 스코프를 `undefined`로 되돌리면 기기 코드 테스트가, 세대 가드를 지우면 경합 테스트가 실패한다
