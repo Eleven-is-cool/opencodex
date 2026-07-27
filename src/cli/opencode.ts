@@ -5,10 +5,11 @@
  * client with stdio inherited. The wiring channel differs — opencode reads providers
  * from merged JSON config layers rather than env slots.
  *
- * The launcher never reads, copies, or rewrites the user's opencode config files. It
- * injects only the generated `provider.opencodex` block through OpenCode's inline runtime
- * layer (`OPENCODE_CONFIG_CONTENT`), which outranks project/global/custom config and
- * avoids duplicating API keys, MCP credentials, or breaking relative `{file:…}` paths.
+ * The launcher never copies or rewrites the user's opencode config files. It may read
+ * global/project config to detect an existing `provider.opencodex` override, then injects
+ * only the generated provider block through OpenCode's inline runtime layer
+ * (`OPENCODE_CONFIG_CONTENT`), which outranks project/global/custom config and avoids
+ * duplicating API keys, MCP credentials, or breaking relative `{file:…}` paths.
  *
  * The admission key is never serialized into that inline config. The provider block
  * carries opencode's documented `{env:VAR}` reference and the real value is passed
@@ -19,8 +20,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { loadConfig } from "../config";
+import { visibleNativeSlugs } from "../codex/catalog";
+import { shouldInjectApiAuthHeader } from "../codex/inject";
 import { commandInvocation } from "../lib/win-exec";
-import { findLiveProxy } from "../server/proxy-liveness";
+import { loadServiceTokenFromFile, serviceApiTokenFilePath } from "../lib/service-secrets";
+import { providerCodexAccountMode } from "../providers/registry";
+import { findLiveProxy, probeHostname, type LiveProxy } from "../server/proxy-liveness";
 import type { OcxConfig } from "../types";
 
 export interface OpencodeLaunchEnv {
@@ -45,7 +50,11 @@ export interface OpencodeModelEntry {
 export interface OpencodeProviderBlock {
   npm: string;
   name: string;
-  options: { baseURL: string; apiKey: string };
+  options: {
+    baseURL: string;
+    apiKey: string;
+    headers?: Record<string, string>;
+  };
   models: Record<string, OpencodeModelEntry>;
 }
 
@@ -198,6 +207,36 @@ export function opencodeModelKey(provider: string, id: string): string {
   return provider === "native" ? id : `${provider}/${id}`;
 }
 
+/** Compose the OpenAI-compatible proxy base URL from a live probe result. */
+export function opencodeProxyBaseUrl(port: number, hostname?: string): string {
+  return `http://${probeHostname(hostname)}:${port}/v1`;
+}
+
+/** Env reference shared by apiKey and the dedicated proxy admission header. */
+export const OPENCODE_API_KEY_ENV_REF = `{env:${OPENCODE_API_KEY_ENV}}`;
+
+/**
+ * Native OpenAI slugs advertised to opencode. Omitted in Codex Direct mode because native
+ * chat-completions require the caller's real ChatGPT OAuth bearer, not proxy admission.
+ */
+export function opencodeLaunchNativeSlugs(config: OcxConfig): string[] {
+  if (providerCodexAccountMode("openai", config.providers?.openai) === "direct") return [];
+  return [...visibleNativeSlugs(config)];
+}
+
+function opencodeProviderOptions(baseURL: string, config: OcxConfig): OpencodeProviderBlock["options"] {
+  const options: OpencodeProviderBlock["options"] = {
+    baseURL,
+    apiKey: OPENCODE_API_KEY_ENV_REF,
+  };
+  // Non-loopback binds accept proxy admission only via x-opencodex-api-key so Authorization
+  // stays free for Codex Direct upstream credentials when applicable.
+  if (shouldInjectApiAuthHeader(config)) {
+    options.headers = { "x-opencodex-api-key": OPENCODE_API_KEY_ENV_REF };
+  }
+  return options;
+}
+
 /**
  * Build the `opencodex` provider block from the proxy's visible catalog.
  *
@@ -211,6 +250,8 @@ export function buildOpencodeProviderBlock(
   nativeSlugs: readonly string[],
   routedModels: readonly OpencodeRoutedModel[],
   nativeContextWindow: (slug: string) => number | undefined = () => undefined,
+  hostname?: string,
+  config?: OcxConfig,
 ): OpencodeProviderBlock {
   const models: Record<string, OpencodeModelEntry> = {};
   const candidates: OpencodeRoutedModel[] = [
@@ -232,9 +273,55 @@ export function buildOpencodeProviderBlock(
   return {
     npm: OPENCODE_PROVIDER_NPM,
     name: "OpenCodex",
-    options: { baseURL: `http://127.0.0.1:${port}/v1`, apiKey: `{env:${OPENCODE_API_KEY_ENV}}` },
+    options: opencodeProviderOptions(opencodeProxyBaseUrl(port, hostname), config ?? loadConfig()),
     models,
   };
+}
+
+export type OpencodeRuntimeConfigError = { error: string };
+
+/** True when mergeOpencodeRuntimeConfig rejected inherited inline config. */
+export function isOpencodeRuntimeConfigError(
+  value: OpencodeGeneratedConfig | OpencodeRuntimeConfigError,
+): value is OpencodeRuntimeConfigError {
+  return "error" in value;
+}
+
+/**
+ * Merge inherited `OPENCODE_CONFIG_CONTENT` and override only `provider.opencodex`.
+ * When no inline layer is present, emit the minimal runtime object for this launcher.
+ */
+export function mergeOpencodeRuntimeConfig(
+  inheritedContent: string | undefined,
+  providerBlock: OpencodeProviderBlock,
+): OpencodeGeneratedConfig | OpencodeRuntimeConfigError {
+  if (!inheritedContent?.trim()) {
+    return {
+      $schema: OPENCODE_CONFIG_SCHEMA,
+      provider: { [OPENCODE_PROVIDER_ID]: providerBlock },
+    };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(inheritedContent);
+  } catch {
+    return { error: "OPENCODE_CONFIG_CONTENT is not valid JSON." };
+  }
+  if (!isRecord(parsed)) {
+    return { error: "OPENCODE_CONFIG_CONTENT must be a JSON object." };
+  }
+  const existingProvider = parsed.provider;
+  if (existingProvider !== undefined && !isRecord(existingProvider)) {
+    return { error: "OPENCODE_CONFIG_CONTENT provider must be a JSON object when present." };
+  }
+  return {
+    ...parsed,
+    $schema: typeof parsed.$schema === "string" ? parsed.$schema : OPENCODE_CONFIG_SCHEMA,
+    provider: {
+      ...(isRecord(existingProvider) ? existingProvider : {}),
+      [OPENCODE_PROVIDER_ID]: providerBlock,
+    },
+  } as OpencodeGeneratedConfig;
 }
 
 /** Inline runtime config carrying only the provider block this launcher owns. */
@@ -243,11 +330,17 @@ export function buildOpencodeConfig(
   nativeSlugs: readonly string[],
   routedModels: readonly OpencodeRoutedModel[],
   nativeContextWindow: (slug: string) => number | undefined = () => undefined,
+  hostname?: string,
+  config?: OcxConfig,
 ): OpencodeGeneratedConfig {
-  return {
-    $schema: OPENCODE_CONFIG_SCHEMA,
-    provider: { [OPENCODE_PROVIDER_ID]: buildOpencodeProviderBlock(port, nativeSlugs, routedModels, nativeContextWindow) },
-  };
+  const merged = mergeOpencodeRuntimeConfig(
+    undefined,
+    buildOpencodeProviderBlock(port, nativeSlugs, routedModels, nativeContextWindow, hostname, config),
+  );
+  if (isOpencodeRuntimeConfigError(merged)) {
+    throw new Error(merged.error);
+  }
+  return merged;
 }
 
 /** Serialize the inline runtime config OpenCode merges on launch. */
@@ -265,33 +358,35 @@ function findGitRoot(start: string): string | null {
   }
 }
 
-function projectConfigDefinesProvider(dir: string): string | null {
-  for (const name of PROJECT_CONFIG_FILENAMES) {
-    const candidate = join(dir, name);
-    if (!existsSync(candidate)) continue;
-    try {
-      const parsed = parseJsonc(readFileSync(candidate, "utf8"));
-      if (isRecord(parsed) && isRecord(parsed.provider) && OPENCODE_PROVIDER_ID in parsed.provider) {
-        return candidate;
-      }
-    } catch {
-      // opencode will report its own parse failure; not this command's business.
-    }
+function configFileDefinesProvider(path: string): boolean {
+  if (!existsSync(path)) return false;
+  try {
+    const parsed = parseJsonc(readFileSync(path, "utf8"));
+    return isRecord(parsed) && isRecord(parsed.provider) && OPENCODE_PROVIDER_ID in parsed.provider;
+  } catch {
+    return false;
   }
-  return null;
 }
 
 /**
- * Detect a project-level opencode.json/jsonc that defines our provider key anywhere
- * between cwd and the nearest Git root. Useful only for an informational note: the inline
- * runtime layer from `OPENCODE_CONFIG_CONTENT` outranks project config.
+ * Detect global or project-level opencode.json/jsonc that defines our provider key.
+ * Informational only: the inline runtime layer from `OPENCODE_CONFIG_CONTENT` outranks both.
  */
-export function projectConfigOverridesProvider(cwd: string): string | null {
+export function opencodeProviderOverridePath(
+  cwd: string,
+  env: OpencodeLaunchEnv = process.env,
+  home: string = homedir(),
+): string | null {
+  const globalPath = opencodeGlobalConfigPath(env, home);
+  if (configFileDefinesProvider(globalPath)) return globalPath;
+
   const gitRoot = findGitRoot(cwd);
   let dir = cwd;
   while (true) {
-    const hit = projectConfigDefinesProvider(dir);
-    if (hit) return hit;
+    for (const name of PROJECT_CONFIG_FILENAMES) {
+      const candidate = join(dir, name);
+      if (configFileDefinesProvider(candidate)) return candidate;
+    }
     if (gitRoot && dir === gitRoot) break;
     const parent = dirname(dir);
     if (parent === dir) break;
@@ -300,16 +395,28 @@ export function projectConfigOverridesProvider(cwd: string): string | null {
   return null;
 }
 
+/** @deprecated Use {@link opencodeProviderOverridePath}. */
+export function projectConfigOverridesProvider(cwd: string): string | null {
+  return opencodeProviderOverridePath(cwd);
+}
+
+function serviceTokenLookupEnv(env: OpencodeLaunchEnv): OpencodeLaunchEnv {
+  if (env.OCX_API_TOKEN_FILE?.trim()) return env;
+  return { ...env, OCX_API_TOKEN_FILE: serviceApiTokenFilePath() };
+}
+
 /**
- * Env assembly (unit-tested). The inline runtime config carries only the generated
- * provider block; the user's existing config layers and `OPENCODE_CONFIG` export stay
- * untouched. The admission key travels here rather than in the inline config.
+ * Env assembly (unit-tested). Inherited inline config is merged and only
+ * `provider.opencodex` is replaced; disk config layers stay untouched. The admission
+ * key travels in the child env rather than in the inline config payload.
  */
 export function buildOpencodeEnv(
-  runtimeConfig: OpencodeGeneratedConfig,
+  providerBlock: OpencodeProviderBlock,
   apiKey: string,
   base: OpencodeLaunchEnv,
-): OpencodeLaunchEnv {
+): OpencodeLaunchEnv | OpencodeRuntimeConfigError {
+  const runtimeConfig = mergeOpencodeRuntimeConfig(base[OPENCODE_CONFIG_CONTENT_ENV], providerBlock);
+  if (isOpencodeRuntimeConfigError(runtimeConfig)) return runtimeConfig;
   return {
     ...base,
     [OPENCODE_CONFIG_CONTENT_ENV]: serializeOpencodeRuntimeConfig(runtimeConfig),
@@ -318,18 +425,20 @@ export function buildOpencodeEnv(
 }
 
 /**
- * Admission key for the proxy. The environment token wins over a configured API key —
- * a non-loopback bind requires OPENCODEX_API_AUTH_TOKEN and may have no apiKeys at all,
- * in which case a placeholder would 401 every request. Same precedence as
- * fetchClaudeContextWindows in src/cli/claude.ts.
+ * Admission key for the proxy: env token, hardened service token file, configured API
+ * key, then the open-loopback placeholder. Never serialized into runtime config.
  */
 export function opencodeApiKey(config: OcxConfig, env: OpencodeLaunchEnv = process.env): string {
-  return env.OPENCODEX_API_AUTH_TOKEN || config.apiKeys?.[0]?.key || "ocx";
+  const envToken = env.OPENCODEX_API_AUTH_TOKEN?.trim();
+  if (envToken) return envToken;
+  const serviceToken = loadServiceTokenFromFile(serviceTokenLookupEnv(env));
+  if (serviceToken) return serviceToken;
+  return config.apiKeys?.[0]?.key || "ocx";
 }
 
-async function ensureProxyForOpencode(config: OcxConfig): Promise<number | null> {
+async function ensureProxyForOpencode(config: OcxConfig): Promise<LiveProxy | null> {
   const live = await findLiveProxy();
-  if (live) return live.port;
+  if (live) return live;
   const cfgPort = config.port;
   const pinPort = typeof cfgPort === "number" && cfgPort > 0 ? cfgPort : 10100;
   const child = spawn(process.execPath, [process.argv[1], "start", "--port", String(pinPort)], {
@@ -345,7 +454,7 @@ async function ensureProxyForOpencode(config: OcxConfig): Promise<number | null>
   const deadline = Date.now() + 8_000;
   while (Date.now() < deadline) {
     const started = await findLiveProxy();
-    if (started) return started.port;
+    if (started) return started;
     await new Promise(resolve => setTimeout(resolve, 250));
   }
   return null;
@@ -368,14 +477,14 @@ export function opencodeNotFoundHint(
 
 export async function cmdOpencode(args: string[]): Promise<number> {
   const config = loadConfig();
-  const port = await ensureProxyForOpencode(config);
-  if (!port) {
+  const live = await ensureProxyForOpencode(config);
+  if (!live) {
     console.error("❌ Proxy did not become healthy after starting.");
     return 1;
   }
 
   const { fetchAllModels } = await import("../server/management-api");
-  const { filterCatalogVisibleModels, nativeOpenAiContextWindow, visibleNativeSlugs } = await import("../codex/catalog");
+  const { filterCatalogVisibleModels, nativeOpenAiContextWindow } = await import("../codex/catalog");
   let allModels: Awaited<ReturnType<typeof fetchAllModels>>;
   try {
     allModels = await fetchAllModels(config);
@@ -390,18 +499,31 @@ export async function cmdOpencode(args: string[]): Promise<number> {
     contextWindow: m.contextWindow,
     displayName: m.displayName,
   }));
-  const nativeSlugs = [...visibleNativeSlugs(config)];
+  const nativeSlugs = opencodeLaunchNativeSlugs(config);
 
-  const runtimeConfig = buildOpencodeConfig(port, nativeSlugs, routed, nativeOpenAiContextWindow);
+  const providerBlock = buildOpencodeProviderBlock(
+    live.port,
+    nativeSlugs,
+    routed,
+    nativeOpenAiContextWindow,
+    live.hostname,
+    config,
+  );
+  const baseUrl = providerBlock.options.baseURL;
   const modelCount = nativeSlugs.length + routed.length;
-  console.error(`✅ opencode wired to http://127.0.0.1:${port}/v1 — ${modelCount} model(s) under provider \`${OPENCODE_PROVIDER_ID}\`.`);
+  console.error(`✅ opencode wired to ${baseUrl} — ${modelCount} model(s) under provider \`${OPENCODE_PROVIDER_ID}\`.`);
   console.error("   Your existing opencode config files are left untouched; only the runtime provider block is injected.");
-  const projectOverride = projectConfigOverridesProvider(process.cwd());
-  if (projectOverride) {
-    console.error(`ℹ ${projectOverride} also defines provider.${OPENCODE_PROVIDER_ID}; the runtime layer from ocx opencode overrides it for this launch.`);
+  const providerOverride = opencodeProviderOverridePath(process.cwd());
+  if (providerOverride) {
+    console.error(`ℹ ${providerOverride} also defines provider.${OPENCODE_PROVIDER_ID}; the runtime layer from ocx opencode overrides it for this launch.`);
   }
 
-  const env = buildOpencodeEnv(runtimeConfig, opencodeApiKey(config), process.env);
+  const builtEnv = buildOpencodeEnv(providerBlock, opencodeApiKey(config), process.env);
+  if ("error" in builtEnv) {
+    console.error(`❌ ${builtEnv.error}`);
+    return 1;
+  }
+  const env = builtEnv;
   return await new Promise<number>(resolve => {
     const inv = commandInvocation("opencode", args);
     const child = spawn(inv.file, inv.args, { stdio: "inherit", env: env as NodeJS.ProcessEnv, ...inv.options });

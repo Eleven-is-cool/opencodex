@@ -28,8 +28,9 @@ opencodex/gpt-5.6-sol      # native slugs stay unprefixed
 
 ## Your own config is never modified
 
-The launcher does not read, copy, or rewrite `~/.config/opencode/opencode.json`,
-project `opencode.json` / `opencode.jsonc`, or any other on-disk config layer. Your
+The launcher does not copy or rewrite `~/.config/opencode/opencode.json`,
+project `opencode.json` / `opencode.jsonc`, or any other on-disk config layer. It may
+read global or project config to detect a `provider.opencodex` override, while your
 existing providers, agents, keybinds, MCP entries, and relative `{file:…}` references
 keep resolving from their original files.
 
@@ -49,18 +50,23 @@ informational note: the runtime layer from `ocx opencode` overrides it for that 
 ## The admission key is not written to disk
 
 When the proxy requires an API key, the inline runtime config carries opencode's
-`{env:…}` reference rather than the secret:
+`{env:…}` reference rather than the secret. Non-loopback binds also send
+`x-opencodex-api-key` from the same env var so proxy admission stays separate from any
+upstream Authorization header:
 
 ```json
 "options": {
   "baseURL": "http://127.0.0.1:10100/v1",
-  "apiKey": "{env:OPENCODEX_OPENCODE_API_KEY}"
+  "apiKey": "{env:OPENCODEX_OPENCODE_API_KEY}",
+  "headers": {
+    "x-opencodex-api-key": "{env:OPENCODEX_OPENCODE_API_KEY}"
+  }
 }
 ```
 
 The real value is passed only through the child process environment.
-`OPENCODEX_API_AUTH_TOKEN` takes precedence over a configured API key, which is what
-a non-loopback bind requires.
+`OPENCODEX_API_AUTH_TOKEN` takes precedence, then the hardened service token file, then
+a configured API key — which is what a non-loopback bind requires.
 
 ## Reverting
 

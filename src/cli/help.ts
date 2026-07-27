@@ -186,12 +186,13 @@ const helpEntries: Record<string, HelpEntry> = {
   },
   opencode: {
     usage: "ocx opencode [opencode args...]",
-    summary: "Launch opencode wired to the proxy (generated provider config).",
+    summary: "Launch opencode wired to the proxy (runtime provider config).",
     details: [
-      "Ensures the proxy is running, then execs `opencode` with OPENCODE_CONFIG pointed at a",
-      "generated config in the opencodex config dir. Your own opencode.json is never modified —",
-      "its settings are merged forward into the generated copy, and only the `opencodex`",
-      "provider key is overwritten.",
+      "Ensures the proxy is running, then execs `opencode` with the generated `provider.opencodex`",
+      "block injected through OpenCode's inline runtime layer (`OPENCODE_CONFIG_CONTENT`). Any",
+      "existing inline config in the environment is preserved and only `provider.opencodex` is",
+      "overwritten for this launch.",
+      "Your on-disk opencode.json / opencode.jsonc files are never modified.",
       "Routed models appear in the model picker as opencodex/<provider>/<model>.",
       "Stop using `ocx opencode` and plain `opencode` behaves exactly as before.",
     ],

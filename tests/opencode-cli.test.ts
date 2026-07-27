@@ -4,16 +4,22 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   OPENCODE_API_KEY_ENV,
+  OPENCODE_API_KEY_ENV_REF,
   OPENCODE_CONFIG_CONTENT_ENV,
   OPENCODE_PROVIDER_ID,
   SCHEMA_REQUIRED_OUTPUT_BUDGET,
   buildOpencodeConfig,
   buildOpencodeEnv,
   buildOpencodeProviderBlock,
+  isOpencodeRuntimeConfigError,
+  mergeOpencodeRuntimeConfig,
   opencodeApiKey,
   opencodeGlobalConfigPath,
+  opencodeLaunchNativeSlugs,
   opencodeModelKey,
   opencodeNotFoundHint,
+  opencodeProviderOverridePath,
+  opencodeProxyBaseUrl,
   parseJsonc,
   projectConfigOverridesProvider,
   serializeOpencodeRuntimeConfig,
@@ -36,10 +42,43 @@ describe("ocx opencode provider block", () => {
     expect(block.npm).toBe("@ai-sdk/openai-compatible");
   });
 
+  test("uses probeHostname for IPv6 and specific-interface binds", () => {
+    expect(buildOpencodeProviderBlock(10100, [], [], () => undefined, "::1").options.baseURL)
+      .toBe("http://[::1]:10100/v1");
+    expect(buildOpencodeProviderBlock(10100, [], [], () => undefined, "192.168.4.10").options.baseURL)
+      .toBe("http://192.168.4.10:10100/v1");
+    expect(opencodeProxyBaseUrl(8080, "fe80::1")).toBe("http://[fe80::1]:8080/v1");
+  });
+
   test("apiKey is an env reference, never a literal secret", () => {
     const block = buildOpencodeProviderBlock(10100, [], []);
-    expect(block.options.apiKey).toBe(`{env:${OPENCODE_API_KEY_ENV}}`);
+    expect(block.options.apiKey).toBe(OPENCODE_API_KEY_ENV_REF);
     expect(JSON.stringify(block)).not.toContain("sk-");
+  });
+
+  test("non-loopback binds add x-opencodex-api-key via env reference", () => {
+    const block = buildOpencodeProviderBlock(
+      10100,
+      [],
+      [],
+      () => undefined,
+      "0.0.0.0",
+      cfg({ hostname: "0.0.0.0" }),
+    );
+    expect(block.options.headers).toEqual({ "x-opencodex-api-key": OPENCODE_API_KEY_ENV_REF });
+    expect(JSON.stringify(block.options.headers)).not.toContain("sk-");
+  });
+
+  test("loopback binds omit the dedicated admission header", () => {
+    const block = buildOpencodeProviderBlock(
+      10100,
+      [],
+      [],
+      () => undefined,
+      "127.0.0.1",
+      cfg({ hostname: "127.0.0.1" }),
+    );
+    expect(block.options.headers).toBeUndefined();
   });
 
   test("routed models key on provider/id, native slugs stay bare", () => {
@@ -111,6 +150,33 @@ describe("ocx opencode runtime config", () => {
     expect(Object.keys(parsed.provider ?? {})).toEqual([OPENCODE_PROVIDER_ID]);
     expect(parsed.provider?.[OPENCODE_PROVIDER_ID]).toBeTruthy();
   });
+
+  test("merges inherited inline settings and overrides only provider.opencodex", () => {
+    const inherited = JSON.stringify({
+      model: "other/default",
+      agents: { coder: { model: "x" } },
+      provider: {
+        other: { npm: "@other/pkg", name: "Other" },
+        [OPENCODE_PROVIDER_ID]: { npm: "stale", name: "Stale" },
+      },
+    });
+    const block = buildOpencodeProviderBlock(10100, [], [{ provider: "kiro", id: "glm-5" }]);
+    const merged = mergeOpencodeRuntimeConfig(inherited, block);
+    expect(isOpencodeRuntimeConfigError(merged)).toBe(false);
+    if (isOpencodeRuntimeConfigError(merged)) return;
+    expect(merged.model).toBe("other/default");
+    expect(merged.agents).toEqual({ coder: { model: "x" } });
+    expect(merged.provider.other).toEqual({ npm: "@other/pkg", name: "Other" });
+    expect(merged.provider[OPENCODE_PROVIDER_ID]).toEqual(block);
+  });
+
+  test("rejects invalid inherited OPENCODE_CONFIG_CONTENT", () => {
+    const block = buildOpencodeProviderBlock(10100, [], []);
+    expect(mergeOpencodeRuntimeConfig("{ not json", block)).toEqual({ error: "OPENCODE_CONFIG_CONTENT is not valid JSON." });
+    expect(mergeOpencodeRuntimeConfig("[]", block)).toEqual({ error: "OPENCODE_CONFIG_CONTENT must be a JSON object." });
+    expect(mergeOpencodeRuntimeConfig(JSON.stringify({ provider: "bad" }), block))
+      .toEqual({ error: "OPENCODE_CONFIG_CONTENT provider must be a JSON object when present." });
+  });
 });
 
 describe("ocx opencode JSONC parsing", () => {
@@ -141,7 +207,51 @@ describe("ocx opencode JSONC parsing", () => {
   });
 });
 
+describe("ocx opencode native slug selection", () => {
+  test("omits native slugs in Codex Direct mode", () => {
+    const config = cfg({
+      providers: {
+        mock: { adapter: "openai-chat", baseUrl: "http://x/v1" },
+        openai: {
+          adapter: "openai-responses",
+          baseUrl: "https://chatgpt.com/backend-api/codex",
+          authMode: "forward",
+          codexAccountMode: "direct",
+        },
+      },
+    });
+    expect(opencodeLaunchNativeSlugs(config)).toEqual([]);
+    const block = buildOpencodeProviderBlock(10100, opencodeLaunchNativeSlugs(config), [], () => undefined, undefined, config);
+    expect(Object.keys(block.models)).toEqual([]);
+  });
+
+  test("keeps native slugs in pool mode", () => {
+    const config = cfg({
+      providers: {
+        mock: { adapter: "openai-chat", baseUrl: "http://x/v1" },
+        openai: {
+          adapter: "openai-responses",
+          baseUrl: "https://chatgpt.com/backend-api/codex",
+          authMode: "forward",
+          codexAccountMode: "pool",
+        },
+      },
+    });
+    expect(opencodeLaunchNativeSlugs(config).length).toBeGreaterThan(0);
+  });
+});
+
 describe("ocx opencode project-layer detection", () => {
+  test("detects a global config that redefines our provider key", () => {
+    const home = mkdtempSync(join(tmpdir(), "ocx-opencode-global-"));
+    const globalDir = join(home, ".config", "opencode");
+    mkdirSync(globalDir, { recursive: true });
+    const globalPath = join(globalDir, "opencode.json");
+    writeFileSync(globalPath, JSON.stringify({ provider: { [OPENCODE_PROVIDER_ID]: { npm: "x" } } }));
+    expect(opencodeProviderOverridePath(join(home, "project"), { XDG_CONFIG_HOME: join(home, ".config") }, home))
+      .toBe(globalPath);
+  });
+
   test("detects a project config that redefines our provider key", () => {
     const dir = mkdtempSync(join(tmpdir(), "ocx-opencode-proj-"));
     writeFileSync(join(dir, "opencode.json"), JSON.stringify({ provider: { [OPENCODE_PROVIDER_ID]: { npm: "x" } } }));
@@ -183,17 +293,47 @@ describe("ocx opencode project-layer detection", () => {
 
 describe("ocx opencode env assembly", () => {
   test("OPENCODE_CONFIG_CONTENT carries only the runtime provider block", () => {
-    const runtime = buildOpencodeConfig(10100, [], [{ provider: "kiro", id: "glm-5" }]);
-    const env = buildOpencodeEnv(runtime, "sk-ocx-123", { OPENCODE_CONFIG: "/user/mine.json", PATH: "/bin" });
-    expect(env.OPENCODE_CONFIG).toBe("/user/mine.json");
-    expect(env.PATH).toBe("/bin");
-    const parsed = JSON.parse(env[OPENCODE_CONFIG_CONTENT_ENV]!) as { provider?: Record<string, unknown> };
+    const block = buildOpencodeProviderBlock(10100, [], [{ provider: "kiro", id: "glm-5" }]);
+    const built = buildOpencodeEnv(block, "sk-ocx-123", { OPENCODE_CONFIG: "/user/mine.json", PATH: "/bin" });
+    expect(isOpencodeRuntimeConfigError(built)).toBe(false);
+    if (isOpencodeRuntimeConfigError(built)) return;
+    expect(built.OPENCODE_CONFIG).toBe("/user/mine.json");
+    expect(built.PATH).toBe("/bin");
+    const parsed = JSON.parse(built[OPENCODE_CONFIG_CONTENT_ENV]!) as { provider?: Record<string, unknown> };
     expect(Object.keys(parsed.provider ?? {})).toEqual([OPENCODE_PROVIDER_ID]);
   });
 
+  test("preserves inherited inline settings in OPENCODE_CONFIG_CONTENT", () => {
+    const block = buildOpencodeProviderBlock(10100, [], [{ provider: "kiro", id: "glm-5" }]);
+    const inherited = JSON.stringify({
+      model: "custom/model",
+      provider: { other: { npm: "@other/pkg" } },
+    });
+    const built = buildOpencodeEnv(block, "sk-ocx-123", { [OPENCODE_CONFIG_CONTENT_ENV]: inherited });
+    expect(isOpencodeRuntimeConfigError(built)).toBe(false);
+    if (isOpencodeRuntimeConfigError(built)) return;
+    const parsed = JSON.parse(built[OPENCODE_CONFIG_CONTENT_ENV]!) as {
+      model?: string;
+      provider?: Record<string, unknown>;
+    };
+    expect(parsed.model).toBe("custom/model");
+    expect(parsed.provider?.other).toEqual({ npm: "@other/pkg" });
+    expect(parsed.provider?.[OPENCODE_PROVIDER_ID]).toEqual(block);
+  });
+
+  test("surfaces invalid inherited OPENCODE_CONFIG_CONTENT as an error", () => {
+    const block = buildOpencodeProviderBlock(10100, [], []);
+    expect(buildOpencodeEnv(block, "sk-ocx-123", { [OPENCODE_CONFIG_CONTENT_ENV]: "[]" }))
+      .toEqual({ error: "OPENCODE_CONFIG_CONTENT must be a JSON object." });
+  });
+
   test("the admission key travels in the child env, matching the config's {env:…} reference", () => {
-    const env = buildOpencodeEnv(buildOpencodeConfig(10100, [], []), "sk-ocx-123", {});
-    expect(env[OPENCODE_API_KEY_ENV]).toBe("sk-ocx-123");
+    const block = buildOpencodeProviderBlock(10100, [], []);
+    const built = buildOpencodeEnv(block, "sk-ocx-123", {});
+    expect(isOpencodeRuntimeConfigError(built)).toBe(false);
+    if (isOpencodeRuntimeConfigError(built)) return;
+    expect(built[OPENCODE_API_KEY_ENV]).toBe("sk-ocx-123");
+    expect(built[OPENCODE_CONFIG_CONTENT_ENV]).not.toContain("sk-ocx-123");
   });
 });
 
@@ -201,6 +341,14 @@ describe("ocx opencode admission key", () => {
   test("the environment token wins over a configured API key", () => {
     const config = cfg({ apiKeys: [{ id: "1", name: "main", key: "sk-cfg", createdAt: "2026-01-01" }] });
     expect(opencodeApiKey(config, { OPENCODEX_API_AUTH_TOKEN: "sk-env" })).toBe("sk-env");
+  });
+
+  test("falls back to the hardened service token file before config.apiKeys", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ocx-opencode-token-"));
+    const tokenFile = join(dir, "service-api-token");
+    writeFileSync(tokenFile, "sk-service\n", "utf8");
+    const config = cfg({ apiKeys: [{ id: "1", name: "main", key: "sk-cfg", createdAt: "2026-01-01" }] });
+    expect(opencodeApiKey(config, { OCX_API_TOKEN_FILE: tokenFile })).toBe("sk-service");
   });
 
   test("falls back to the configured proxy API key", () => {
