@@ -182,8 +182,75 @@ expect(oldCatalog?.models?.[0]?.supported_reasoning_levels?.some(
 
 | 계측 결과 | 처분 |
 | --- | --- |
-| 런처가 127로 죽고 카탈로그는 다른 경로로 로드됨 | 런처를 빌트인으로 고치고, **단정을 강화**해 실제 로드 경로를 고정한다. 그래야 회귀가 잡힌다 |
+| 런처가 127로 죽고 카탈로그는 다른 경로로 로드됨 | 런처를 빌트인으로 고치고, **단정을 강화**해 실제 로드 경로를 고정한다 |
 | 런처가 정상 동작함 (재현 실패) | P1을 근거와 함께 rebut하고 #610에 기록. NOOP |
+
+## B 단계 계측 결과 — **P1은 오탐이었다 (NOOP)**
+
+계측을 실제로 돌린 결과, 두 번째 분기가 사실이다. 근거는 세 단계다.
+
+### 1. 테스트 안에서 카탈로그는 로드된다
+
+`loadBundledCodexCatalog()` 반환값을 임시로 찍어 봤다 (계측 후 원복함):
+
+```
+[PROBE] oldCatalog = loaded, models=1
+[PROBE] newCatalog = loaded, models=1
+(pass) resolveCodexRuntime > persisted runtime stamp busts resolve memo [140.50ms]
+```
+
+`null`이 아니다. 런처가 실제로 카탈로그를 출력했다는 뜻이다.
+
+### 2. `null`이었다면 테스트는 실패했을 것이다
+
+"옵셔널 체이닝이 `undefined`를 내니 `.toBe(false)`가 통과할 것"이라는 초안의 추론은
+틀렸다. 직접 확인했다:
+
+```
+expect(undefined).toBe(false)
+  Expected: false
+  Received: undefined
+(fail)
+```
+
+즉 이 테스트는 카탈로그 로드 실패를 **잡아낸다**. 조용히 통과하는 구조가 아니었다.
+
+### 3. `PATH=""`가 자식 프로세스에 전달되지 않는다
+
+왜 런처가 죽지 않는가. `runCodexDebugModels`
+([src/codex/catalog/bundled.ts:137-143](/Users/jun/developer/new/700_projects/opencodex/src/codex/catalog/bundled.ts))는
+`execFile`에 `env` 옵션을 **넘기지 않는다**. Node/Bun이 `env`를 생략하면 자식은
+부모 환경을 상속하는데, 그 스냅샷은 프로세스 시작 시점 기준이라
+런타임에 `process.env.PATH = ""`로 바꾼 것이 반영되지 않는다.
+
+동일 런처를 세 조건으로 실행한 결과:
+
+```
+A: process.env.PATH='' , no env opt      OK   {"models":[{"slug":"x"}]}
+B: explicit env {...process.env}         THREW 127
+C: explicit env {PATH:''}                THREW 127
+```
+
+A가 테스트의 실제 경로다. B/C는 `env`를 명시적으로 넘기는 경우 — 앞선 단독 재현이
+`env: { ...process.env, PATH: "" }`를 썼기 때문에 127이 났다. 코드가 실제로 타는
+경로가 아니었다.
+
+### 결론
+
+리뷰 봇의 P1은 코드를 읽고 추론한 것이고, 그 추론은 `PATH=""`가 자식에게 전달된다는
+전제 위에 있다. 이 코드베이스에서는 그 전제가 성립하지 않는다.
+
+**단, 테스트의 격리 의도는 실제로는 달성되지 않고 있다.** `PATH=""`를 설정하는 줄
+([tests/codex-runtime.test.ts:373](/Users/jun/developer/new/700_projects/opencodex/tests/codex-runtime.test.ts))은
+아무 효과가 없다. 머신에 진짜 `codex`가 PATH에 있으면 이 테스트가 그것을 집을
+가능성이 남아 있다는 뜻이다. 다만 테스트는 `CODEX_CLI_PATH`와 `persistCodexRuntime`으로
+절대 경로를 직접 지정하므로 현재 구조에서 오염이 실제로 발생하지는 않는다.
+
+이건 별개의 위생 문제이고, `src/codex/catalog/bundled.ts`의 `env` 전달 여부를
+바꾸는 일은 프로브 동작 변경이라 #610의 영역과 겹친다. **WP2는 NOOP으로 닫고**,
+관측 사실을 #610에 코멘트로 남겨 저자와 메인테이너가 판단하게 한다.
+
+터미널 판정: **NOOP** (코드 변경 없음, 관측 결과 코멘트로 전달).
 
 `mihneaptu`의 포크 브랜치에는 push하지 않는다. 우리는 `dev` 대상 브랜치에 고치고,
 #610에 "P1은 네가 `056aa2d6e`에서 이미 고쳤다. 다만 같은 파일의 다른 테스트(head:514,
