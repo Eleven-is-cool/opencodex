@@ -172,6 +172,7 @@ token の代わりに使えます。すべての候補は timing side channel �
 | `modelReasoningEfforts?` | `Record<string,string[]>` | モデル別 reasoning ラベル。空配列はそのモデルの effort control を隠します。 |
 | `modelSupportsReasoningSummaries?` | `Record<string,boolean>` | モデル別 reasoning summary capability。`false` にすると summary 対応を広告せず、`openai-responses` リクエスト前に summary-delivery フィールドを除去します。 |
 | `modelReasoningSummaryDelivery?` | `Record<string,"sequential" \| "sequential_cutoff" \| "concurrent" \| "concurrent_cutoff">` | モデル別の Responses delivery enum。設定したモデルは summary 対応を維持し、既存の `stream_options.reasoning_summary_delivery` だけを書き換えます。同じモデルの summary capability を `false` にはできません。 |
+| `modelPreferHostedTools?` | `Record<string,string[]>` | hosted tool namespace を予約する非 forward Responses gateway 向けの完全一致モデル opt-in。現在は `["image_generation"]` のみを受け付けます。一致したモデルは `openai-responses` wire を使い、その hosted tool をサポートする必要があります。競合するクライアント `image_gen` 宣言を除去し、呼び出し元の tool choice を維持するため selector も書き換えます。OpenAI API の仮想 `-pro` モデルでは、まず選択した公開 ID に一致させ、解決後のベース wire-model ID をフォールバックとして使用します。`modelAdapters` は公開 ID、次にベース ID の順に解決し、後者の結果が最終 wire を決めます。未設定のモデルは通常の alias 動作を維持します。 |
 | `reasoningEffortMap?` | `Record<string,string>` | プロバイダー単位の reasoning ラベル wire alias。上流が別の値を要求するときだけ使います。 |
 | `modelReasoningEffortMap?` | `Record<string,Record<string,string>>` | モデル別 reasoning ラベル wire alias。 |
 | `noReasoningModels?` | `string[]` | reasoning/thinking パラメータを拒否するモデル。アダプターが `reasoning_effort` を削除します。 |

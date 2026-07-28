@@ -172,6 +172,7 @@ x-opencodex-api-key: your-secret-token
 | `modelReasoningEfforts?` | `Record<string,string[]>` | 模型级 reasoning label。空数组会隐藏该模型的 effort 控件。 |
 | `modelSupportsReasoningSummaries?` | `Record<string,boolean>` | 模型级 reasoning summary 能力。设为 `false` 时不再声明 summary 支持，并在 `openai-responses` 请求前移除 summary-delivery 字段。 |
 | `modelReasoningSummaryDelivery?` | `Record<string,"sequential" \| "sequential_cutoff" \| "concurrent" \| "concurrent_cutoff">` | 模型级 Responses delivery enum。已配置模型保持 summary 能力，适配器只改写现有的 `stream_options.reasoning_summary_delivery`；同一模型不能同时将 summary 能力设为 `false`。 |
+| `modelPreferHostedTools?` | `Record<string,string[]>` | 非 forward Responses gateway 的精确模型 ID opt-in，用于上游预留 hosted tool namespace 的情况。目前只支持 `["image_generation"]`；匹配模型必须使用 `openai-responses` wire 且支持该 hosted 工具。它会移除冲突的客户端 `image_gen` 声明，并改写其 selector 以保持调用方的 tool choice。对于 OpenAI API 的虚拟 `-pro` 模型，先匹配所选公开 ID，未命中时才使用解析出的基础 wire-model ID 作为回退。`modelAdapters` 会先按公开 ID、再按基础 ID 解析；后一次结果决定最终 wire。未配置模型保持普通 alias 行为。 |
 | `reasoningEffortMap?` | `Record<string,string>` | provider 级 reasoning label wire alias。只在上游需要不同值时使用。 |
 | `modelReasoningEffortMap?` | `Record<string,Record<string,string>>` | 模型级 reasoning label wire alias。 |
 | `noReasoningModels?` | `string[]` | 拒绝 reasoning/thinking 参数的模型；adapter 会为它们移除 `reasoning_effort`。 |
