@@ -215,42 +215,88 @@ expect(undefined).toBe(false)
 
 즉 이 테스트는 카탈로그 로드 실패를 **잡아낸다**. 조용히 통과하는 구조가 아니었다.
 
-### 3. `PATH=""`가 자식 프로세스에 전달되지 않는다
+### 3. Bun이 시작 시점 환경을 스냅샷한다 — Node와 다르다
 
-왜 런처가 죽지 않는가. `runCodexDebugModels`
+> **A 게이트 3라운드 정정.** 초안은 이를 "Node/Bun 공통 동작"이라고 적었다. 틀렸다.
+> 이건 **Bun 고유 동작**이고, 그 구분이 결론의 의미를 바꾼다.
+
+`runCodexDebugModels`
 ([src/codex/catalog/bundled.ts:137-143](/Users/jun/developer/new/700_projects/opencodex/src/codex/catalog/bundled.ts))는
-`execFile`에 `env` 옵션을 **넘기지 않는다**. Node/Bun이 `env`를 생략하면 자식은
-부모 환경을 상속하는데, 그 스냅샷은 프로세스 시작 시점 기준이라
-런타임에 `process.env.PATH = ""`로 바꾼 것이 반영되지 않는다.
-
-동일 런처를 세 조건으로 실행한 결과:
+`execFile`에 `env` 옵션을 넘기지 않는다. 같은 스크립트를 두 런타임으로 돌린 결과:
 
 ```
-A: process.env.PATH='' , no env opt      OK   {"models":[{"slug":"x"}]}
+process.env.PATH = "";  execFileSync(bin, [], { encoding: "utf8" })
+
+=== BUN  ===  CHILD_PATH=[/Users/jun/.nvm/.../bin:/opt/homebrew/bin:...]   ← 원본 PATH
+=== NODE ===  CHILD_PATH=[]                                                ← 반영됨
+```
+
+Bun은 자식 스폰용 환경을 프로세스 시작 시점에 스냅샷하고, 이후의
+`process.env` 변경을 관찰하지 않는다. Node는 반영한다.
+
+세 조건 비교:
+
+```
+A: process.env.PATH='' , no env opt      OK   (Bun 한정)
 B: explicit env {...process.env}         THREW 127
 C: explicit env {PATH:''}                THREW 127
 ```
 
-A가 테스트의 실제 경로다. B/C는 `env`를 명시적으로 넘기는 경우 — 앞선 단독 재현이
-`env: { ...process.env, PATH: "" }`를 썼기 때문에 127이 났다. 코드가 실제로 타는
-경로가 아니었다.
+### 3-1. B는 가상이 아니라 실제 호출 지점이다
+
+`src/codex/runtime.ts:261`이 정확히 조건 B다:
+
+```ts
+env: { ...(deps.env ?? process.env), CODEX_HOME: probeHome },
+```
+
+즉 한 테스트 실행 안에서 **두 프로브가 서로 다른 환경을 본다.**
+
+| 프로브 | 호출 | 자식이 보는 PATH |
+| --- | --- | --- |
+| `--version` (`runtime.ts:261`) | `env` 명시 | `""` — 반영됨 |
+| `debug models` (`bundled.ts:137`) | `env` 생략 | 원본 — Bun 스냅샷 |
+
+`--version` 쪽이 살아남는 건 `echo`가 셸 빌트인이라 PATH 조회가 필요 없기 때문이다.
+이 비대칭이 테스트가 초록인 진짜 이유다.
 
 ### 결론
 
-리뷰 봇의 P1은 코드를 읽고 추론한 것이고, 그 추론은 `PATH=""`가 자식에게 전달된다는
-전제 위에 있다. 이 코드베이스에서는 그 전제가 성립하지 않는다.
+리뷰 봇의 P1은 **Node 의미론에서는 옳다.** 다만 이 저장소는 Bun 네이티브 런타임이고
+(AGENTS.md), Bun에서는 그 전제가 성립하지 않아 발화하지 않는다. 봇이 틀린 게 아니라
+런타임이 다르다.
 
-**단, 테스트의 격리 의도는 실제로는 달성되지 않고 있다.** `PATH=""`를 설정하는 줄
-([tests/codex-runtime.test.ts:373](/Users/jun/developer/new/700_projects/opencodex/tests/codex-runtime.test.ts))은
-아무 효과가 없다. 머신에 진짜 `codex`가 PATH에 있으면 이 테스트가 그것을 집을
-가능성이 남아 있다는 뜻이다. 다만 테스트는 `CODEX_CLI_PATH`와 `persistCodexRuntime`으로
-절대 경로를 직접 지정하므로 현재 구조에서 오염이 실제로 발생하지는 않는다.
+주의할 점: 이 테스트의 통과가 **Bun 구현 세부에 의존한다.** Bun이 향후 Node와
+정렬되면 `tests/codex-runtime.test.ts:360`은 코드 변경 없이 실패하기 시작한다.
 
-이건 별개의 위생 문제이고, `src/codex/catalog/bundled.ts`의 `env` 전달 여부를
-바꾸는 일은 프로브 동작 변경이라 #610의 영역과 겹친다. **WP2는 NOOP으로 닫고**,
-관측 사실을 #610에 코멘트로 남겨 저자와 메인테이너가 판단하게 한다.
+### 정정 — `PATH=""`는 장식이 아니다
 
-터미널 판정: **NOOP** (코드 변경 없음, 관측 결과 코멘트로 전달).
+> 3라운드에서 뒤집힌 두 번째 주장. 초안은 "격리 의도가 달성되지 않는다"고 적었는데
+> **틀렸다.**
+
+`PATH`는 자식 프로세스만 쓰는 게 아니라 **in-process에서도 읽힌다.**
+`pathCandidates()`
+([src/codex/runtime.ts:308-312](/Users/jun/developer/new/700_projects/opencodex/src/codex/runtime.ts))가
+`deps.env ?? process.env`의 `PATH`를 분해해 후보 바이너리 목록을 만든다. in-process
+읽기는 Bun의 스폰 스냅샷과 무관하게 변경을 즉시 본다.
+
+가짜 `codex`를 PATH에 심고 측정한 결과:
+
+```
+PATH=<fakedir> -> source: path      version: 9.9.9
+PATH=''        -> source: fallback  version: null
+```
+
+`PATH=""`가 결과를 바꾼다. 즉 이 줄은 **머신에 설치된 진짜 `codex`가 후보 목록에
+들어오는 것을 실제로 막고 있다.** `CODEX_CLI_PATH` 고정은 두 번째 층이지 대체가 아니다.
+
+이 줄을 "장식이니 지워도 된다"고 판단했다면 테스트를 머신 의존으로 만들 뻔했다.
+
+### 최종 처분
+
+터미널 판정: **NOOP** (코드 변경 없음). NOOP 판정 자체는 유효하다 — P1이 이 런타임에서
+발화하지 않는다는 결론은 바뀌지 않았다. 바뀐 것은 그 이유의 설명이고, 잘못 전달한
+두 진술은 #610에 정정 코멘트로 바로잡는다.
 
 `mihneaptu`의 포크 브랜치에는 push하지 않는다. 우리는 `dev` 대상 브랜치에 고치고,
 #610에 "P1은 네가 `056aa2d6e`에서 이미 고쳤다. 다만 같은 파일의 다른 테스트(head:514,
